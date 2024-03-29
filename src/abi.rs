@@ -77,7 +77,9 @@ impl ContractAbi {
 
         let ty = DynSolType::Tuple(types);
         // TODO fix error message
-        let dynavalues = ty.coerce_str(args).map_err(|_| anyhow!("HERE error..."))?;
+        let dynavalues = ty.coerce_str(args).map_err(|_| {
+            anyhow!("Error coercing the arguments for the constructor. Check the input argument(s)")
+        })?;
         let encoded_args = dynavalues.abi_encode_params();
         let is_payable = matches!(constructor.state_mutability, StateMutability::Payable);
 
@@ -91,8 +93,11 @@ impl ContractAbi {
             .map(|i| i.resolve().unwrap())
             .collect::<Vec<_>>();
         let ty = DynSolType::Tuple(types);
-        ty.coerce_str(args)
-            .map_err(|_| anyhow!("Error coercing the arguments for the function call"))
+        ty.coerce_str(args).map_err(|_| {
+            anyhow!(
+                "Error coercing the arguments for the function call. Check the input argument(s)"
+            )
+        })
     }
 
     pub fn encode_function(
@@ -129,5 +134,104 @@ impl ContractAbi {
         Err(anyhow::anyhow!(
             "Arguments to the function do not match what is expected"
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use alloy_primitives::{Address, U256};
+    use alloy_sol_types::{sol, SolCall};
+
+    sol! {
+
+        struct HelloInput {
+            uint256 value;
+            address owner;
+            uint160 beta;
+        }
+
+        contract HelloWorld {
+            address public owner;
+            function hello(HelloInput params) external returns (bool);
+        }
+    }
+
+    sol! {
+        contract MrOverLoads {
+            function one() public returns (bool);
+            function one(uint256);
+            function one(address, (uint64, uint64)) public returns (address);
+        }
+    }
+
+    #[test]
+    fn check_constructor_encoding() {
+        let input = vec!["constructor()"];
+        let mut abi = ContractAbi::from_human_readable(input);
+        // short-circuit internal check...
+        abi.bytecode = Some(b"hello".into());
+
+        assert!(abi.encode_constructor("()").is_ok());
+        assert!(abi.encode_constructor("(1234)").is_err());
+    }
+
+    #[test]
+    fn encoding_functions() {
+        let hello_world = vec!["function hello(tuple(uint256, address, uint160)) (bool)"];
+        let hw = ContractAbi::from_human_readable(hello_world);
+        assert!(hw.has_function("hello"));
+
+        let addy = Address::with_last_byte(24);
+        let solencoded = HelloWorld::helloCall {
+            params: HelloInput {
+                value: U256::from(10),
+                owner: addy,
+                beta: U256::from(1),
+            },
+        }
+        .abi_encode();
+
+        assert!(hw.encode_function("bob", "()").is_err());
+        assert!(hw.encode_function("hello", "(1,2").is_err());
+
+        let (cencoded, is_payable, dtype) = hw
+            .encode_function("hello", &format!("(({}, {}, {}))", 10, addy.to_string(), 1))
+            .unwrap();
+
+        assert!(!is_payable);
+        assert_eq!(solencoded, cencoded);
+        assert_eq!(dtype, DynSolType::Tuple(vec![DynSolType::Bool]));
+    }
+
+    #[test]
+    fn encoding_overloaded_functions() {
+        let overit = vec![
+            "function one() (bool)",
+            "function one(uint256)",
+            "function one(address, (uint64, uint64)) (address)",
+        ];
+        let abi = ContractAbi::from_human_readable(overit);
+        let addy = Address::with_last_byte(24);
+
+        let sa = MrOverLoads::one_0Call {}.abi_encode();
+        let (aa, _, _) = abi.encode_function("one", "()").unwrap();
+        assert_eq!(sa, aa);
+
+        let sb = MrOverLoads::one_1Call { _0: U256::from(1) }.abi_encode();
+        let (ab, _, _) = abi.encode_function("one", "(1)").unwrap();
+        assert_eq!(sb, ab);
+
+        let sc = MrOverLoads::one_2Call {
+            _0: addy,
+            _1: (10u64, 11u64),
+        }
+        .abi_encode();
+        let (ac, _, _) = abi
+            .encode_function("one", &format!("({},({},{}))", addy.to_string(), 10, 11))
+            .unwrap();
+
+        assert_eq!(sc, ac);
     }
 }
