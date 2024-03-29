@@ -1,7 +1,11 @@
+//!
+//! Formats used for serializing snapshots of the EVM (json).
+//!
 use revm::primitives::{Address, Bytes, U256};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// Source of the snapshop.  Either from a fork or the local in-memory DB.
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub enum SerializingSource {
     Memory,
@@ -9,6 +13,7 @@ pub enum SerializingSource {
     Fork,
 }
 
+/// A single AccountRecord and it's associated storage
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SerializableAccountRecord {
     pub nonce: u64,
@@ -17,6 +22,8 @@ pub struct SerializableAccountRecord {
     pub storage: BTreeMap<U256, U256>,
 }
 
+/// The high-level objects containing the snapshot.
+/// For in-memory only interactions, block_num will be 0
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct SerializableState {
     pub source: SerializingSource,

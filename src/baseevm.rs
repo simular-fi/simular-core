@@ -82,7 +82,7 @@ impl EvmFork {
     }
 }
 
-impl Default for BaseEvm<InMemoryDb> {
+impl Default for EvmMemory {
     fn default() -> Self {
         let db = InMemoryDb::default();
         let evm = Evm::builder().with_db(db).build();
@@ -92,7 +92,7 @@ impl Default for BaseEvm<InMemoryDb> {
     }
 }
 
-impl BaseEvm<InMemoryDb> {
+impl EvmMemory {
     pub fn create_account(&mut self, caller: Address, amount: Option<U256>) -> Result<()> {
         let mut info = AccountInfo::default();
         if let Some(amnt) = amount {
