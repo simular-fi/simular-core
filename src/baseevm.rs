@@ -14,13 +14,19 @@ use crate::{
     snapshot::{SerializableAccountRecord, SerializableState, SerializingSource},
 };
 
+/// Simpler types for both versions of the Evm
 pub type EvmFork = BaseEvm<ForkDb>;
 pub type EvmMemory = BaseEvm<InMemoryDb>;
 
+/// Provides main interaction with the under-lying EVM
 pub struct BaseEvm<DB: Database + DatabaseCommit> {
     state: Option<ContextWithHandlerCfg<(), DB>>,
 }
 
+/// Create an EVM that will pull missing information from
+/// a remote json-rpc endpoint.
+/// - `url` is the url to access the endpoint
+/// - `block_number` where to start. if none, it will use the latest block
 impl EvmFork {
     pub fn create(url: &str, block_number: Option<u64>) -> Self {
         let db = ForkDb::new(url, block_number);
@@ -30,6 +36,7 @@ impl EvmFork {
         }
     }
 
+    /// Create an account for the `caller` with an optional balance in `wei`
     pub fn create_account(&mut self, caller: Address, amount: Option<U256>) -> Result<()> {
         let mut info = AccountInfo::default();
         if let Some(amnt) = amount {
@@ -42,6 +49,7 @@ impl EvmFork {
         Ok(())
     }
 
+    /// Dump the current state of the db to Json
     pub fn dump_state(&mut self) -> Result<SerializableState> {
         let mut evm = self.get_evm();
         // adapted from foundry-rs
@@ -144,6 +152,7 @@ impl EvmMemory {
         })
     }
 
+    /// Load state from a json file
     pub fn load_state(&mut self, cache: SerializableState) {
         let mut evm = self.get_evm();
         evm.context.evm.db.set_blocknumber(cache.block_num);
@@ -196,6 +205,7 @@ impl<DB: Database + DatabaseCommit> BaseEvm<DB> {
         }
     }
 
+    /// View an internal storage slot for the given `Address` and `slot`
     pub fn view_storage_slot(&mut self, addr: Address, slot: U256) -> Result<U256> {
         let mut evm = self.get_evm();
         let r = evm
@@ -209,7 +219,7 @@ impl<DB: Database + DatabaseCommit> BaseEvm<DB> {
         Ok(r)
     }
 
-    /// Get the balance for the account
+    /// Get the balance for the given account
     pub fn get_balance(&mut self, caller: Address) -> Result<U256> {
         let mut evm = self.get_evm();
         let result = match evm.context.evm.db.basic(caller) {

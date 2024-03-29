@@ -1,6 +1,4 @@
-//!
-//! In-memory only storage for the EVM.
-//!
+/// In-memory store for the EVM
 use alloy_primitives::{Address, Log, U256};
 use anyhow::Result;
 use revm::{

@@ -2,6 +2,7 @@ use alloy_primitives::{Address, U256};
 use revm::primitives::B256;
 use thiserror::Error;
 
+/// Wrapper for Database errors
 #[derive(Error, Debug)]
 pub enum DatabaseError {
     #[error("missing AccountInfo {0}")]
