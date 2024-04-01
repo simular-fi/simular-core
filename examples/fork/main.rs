@@ -372,6 +372,11 @@ pub fn main() {
     };
     */
 
+    let xstart = 0 as f32;
+    let xstop = 9 as f32;
+    let ystart = data.1 .1 .0 as f32;
+    let ystop = data.1 .1 .1 as f32;
+
     // Plot it!!
     let root = BitMapBackend::new("5.png", (640, 480)).into_drawing_area();
     root.fill(&WHITE).unwrap();
@@ -384,7 +389,7 @@ pub fn main() {
         .x_label_area_size(20)
         .y_label_area_size(40)
         // Finally attach a coordinate on the drawing area and make a chart context
-        .build_cartesian_2d(0f32..9f32, 3482f32..3484.5f32)
+        .build_cartesian_2d(xstart..xstop, ystart..ystop)
         .unwrap();
 
     // Then we can draw a mesh

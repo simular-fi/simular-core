@@ -182,7 +182,6 @@ impl ForkDb {
         let number = U64::from(u64::try_from(number).unwrap());
         let block: Option<Block<TxHash>> =
             Self::block_on(provider.get_block(BlockId::from(number)))?;
-        // If number is given, the block is supposed to be finalized so unwrap is safe too.
         Ok(B256::new(block.unwrap().hash.unwrap().0))
     }
 }

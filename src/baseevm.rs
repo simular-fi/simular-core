@@ -2,8 +2,8 @@ use alloy_sol_types::decode_revert_reason;
 use anyhow::Result;
 use revm::{
     primitives::{
-        AccountInfo, Address, Bytecode, EVMError, ExecutionResult, Log, Output, ResultAndState,
-        TransactTo, TxEnv, KECCAK_EMPTY, U256,
+        result::EVMError, AccountInfo, Address, Bytecode, ExecutionResult, Log, Output,
+        ResultAndState, TransactTo, TxEnv, KECCAK_EMPTY, U256,
     },
     ContextWithHandlerCfg, Database, DatabaseCommit, Evm, Handler,
 };
@@ -23,8 +23,7 @@ pub struct BaseEvm<DB: Database + DatabaseCommit> {
     state: Option<ContextWithHandlerCfg<(), DB>>,
 }
 
-/// Create an EVM that will pull missing information from
-/// a remote json-rpc endpoint.
+/// Create an EVM that will pull missing information from a remote json-rpc endpoint.
 /// - `url` is the url to access the endpoint
 /// - `block_number` where to start. if none, it will use the latest block
 impl EvmFork {
@@ -205,7 +204,7 @@ impl<DB: Database + DatabaseCommit> BaseEvm<DB> {
         }
     }
 
-    /// View an internal storage slot for the given `Address` and `slot`
+    /// View an internal storage slot for the given address and slot index
     pub fn view_storage_slot(&mut self, addr: Address, slot: U256) -> Result<U256> {
         let mut evm = self.get_evm();
         let r = evm
@@ -219,7 +218,7 @@ impl<DB: Database + DatabaseCommit> BaseEvm<DB> {
         Ok(r)
     }
 
-    /// Get the balance for the given account
+    /// Return the balance of the given address
     pub fn get_balance(&mut self, caller: Address) -> Result<U256> {
         let mut evm = self.get_evm();
         let result = match evm.context.evm.db.basic(caller) {
@@ -231,7 +230,14 @@ impl<DB: Database + DatabaseCommit> BaseEvm<DB> {
         Ok(result)
     }
 
-    /// Deploy a contract
+    /// Deploy a contract. Where:
+    ///
+    /// - `caller` is the creator (msg.sender)
+    /// - `bincode` is the constructor arguments + contract bytecode
+    /// - `value` in `wei` to send to the contract.  Note the call will revert if
+    /// the constructor is not marked as `payable`.
+    ///
+    /// Returns the address of the deployed contract
     pub fn deploy(&mut self, caller: Address, bincode: Vec<u8>, value: U256) -> Result<Address> {
         let tx = TxEnv {
             caller,
@@ -329,7 +335,7 @@ impl<DB: Database + DatabaseCommit> BaseEvm<DB> {
         self.handle_call_or_simulate(tx)
     }
 
-    /// Simulate a write call w/out changing state
+    /// Simulate executing a transaction without changing state
     pub fn simulate(
         &mut self,
         caller: Address,
@@ -357,7 +363,7 @@ impl<DB: Database + DatabaseCommit> BaseEvm<DB> {
                 let (r, gas, _) = process_result_with_value(result)?;
                 Ok((r, gas))
             }
-            _ => Err(anyhow::anyhow!("CALL/SIMULATE: EVM error")),
+            Err(_e) => Err(anyhow::anyhow!("CALL/SIMULATE: EVM error")),
         }
     }
 }
@@ -394,18 +400,34 @@ fn process_result_with_value(result: ExecutionResult) -> Result<(Vec<u8>, u64, V
     Ok((bits.to_vec(), gas_used, logs))
 }
 
-/*
-fn parse_revert_message(output: revm::primitives::Bytes) -> Result<String> {
-    //let ty = DynSolType::parse("string")?;
-    // Ensure the revert output bytes size! See alloy Revert
-    //let rd = ty.abi_decode_params(&output[4..])?;
-    match decode_revert_reason(&output) {
-        Some(reason) => Ok(reason),
-        _ => anyhow::bail!("Revert with no reason"),
+#[cfg(test)]
+mod tests {
+    use crate::generate_random_addresses;
+    use alloy_sol_types::{sol, SolCall};
+
+    use super::*;
+
+    #[test]
+    fn balance_transfer() {
+        let one_eth = U256::from(1e18);
+        let addresses = generate_random_addresses(2);
+        let bob = addresses[0];
+        let alice = addresses[1];
+
+        let mut evm = EvmMemory::default();
+        evm.create_account(bob, Some(U256::from(2e18))).unwrap();
+        evm.create_account(alice, None).unwrap();
+
+        assert!(evm.transfer(alice, bob, one_eth).is_err()); // alice has nothing to transfer...yet
+        assert!(evm.transfer(bob, alice, one_eth).is_ok());
+
+        assert!(evm.get_balance(bob).unwrap() == one_eth);
+        assert!(evm.get_balance(alice).unwrap() == one_eth);
     }
-    //match rd {
-    //    DynSolValue::String(v) => Ok(v),
-    //    _ => anyhow::bail!("Revert: unable to parse revert message"),
-    //}
+
+    #[test]
+    fn deploy_and_interact() {
+        // TODO use the DAI contract: https://etherscan.io/token/0x6b175474e89094c44da98b954eedeac495271d0f
+        //let evm = EvmMemory::default();
+    }
 }
-*/

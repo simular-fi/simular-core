@@ -76,7 +76,6 @@ impl ContractAbi {
             .collect::<Vec<_>>();
 
         let ty = DynSolType::Tuple(types);
-        // TODO fix error message
         let dynavalues = ty.coerce_str(args).map_err(|_| {
             anyhow!("Error coercing the arguments for the constructor. Check the input argument(s)")
         })?;

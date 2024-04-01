@@ -12,3 +12,14 @@ pub mod snapshot;
 
 // re-exports
 pub use {abi::ContractAbi, baseevm::EvmFork, baseevm::EvmMemory, snapshot::SerializableState};
+
+use alloy_primitives::Address;
+
+/// Generate the given `num` of addresses
+pub fn generate_random_addresses(num: u8) -> Vec<Address> {
+    let mut addresses: Vec<alloy_primitives::Address> = Vec::new();
+    for i in 1..=num {
+        addresses.push(Address::repeat_byte(i));
+    }
+    addresses
+}
