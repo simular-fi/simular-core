@@ -1,4 +1,4 @@
-//! This library provides a simple API for interating with an embedded Ethereum Virtual Machine (EVM).
+//! This library provides a simple API for interacting with an embedded Ethereum Virtual Machine (EVM).
 //!
 //! <br/>
 //!
