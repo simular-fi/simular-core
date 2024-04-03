@@ -43,5 +43,5 @@ openssl = { version = "0.10", features = ["vendored"] }
 
 
 [dev-dependencies]
-rstest = "0.18.2"
 dotenvy = "0.15.7"
+rstest = "0.18.2"
