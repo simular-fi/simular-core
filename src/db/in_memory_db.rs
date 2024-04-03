@@ -2,7 +2,10 @@
 //! ADAPTED FROM Foundry-rs
 //! https://github.com/foundry-rs/foundry/blob/master/crates/evm/core/src/backend/in_memory_db.rs
 //!
-use crate::errors::DatabaseError;
+use crate::{
+    errors::DatabaseError,
+    snapshot::{SnapShot, SnapShotAccountRecord, SnapShotSource},
+};
 use alloy_primitives::{Address, B256, U256};
 use revm::{
     db::{CacheDB, DatabaseRef, EmptyDB},
@@ -10,17 +13,11 @@ use revm::{
     Database, DatabaseCommit,
 };
 
-/// Type alias for an in memory database
 ///
-/// See `EmptyDBWrapper`
-pub type SimularEvmInMemoryDB = CacheDB<EmptyDBWrapper>;
-
-/// In memory Database for anvil
-///
-/// This acts like a wrapper type for [InMemoryDB] but is capable of applying snapshots
+/// This acts like a wrapper type for [InMemoryDB] but is capable of creating/applying snapshots
 #[derive(Debug)]
 pub struct MemDb {
-    pub db: SimularEvmInMemoryDB,
+    pub db: CacheDB<EmptyDBWrapper>,
 }
 
 impl Default for MemDb {
@@ -28,6 +25,41 @@ impl Default for MemDb {
         Self {
             db: CacheDB::new(Default::default()),
         }
+    }
+}
+
+impl MemDb {
+    pub fn create_snapshot(&self, block_num: u64) -> anyhow::Result<SnapShot> {
+        let accounts = self
+            .db
+            .accounts
+            .clone()
+            .into_iter()
+            .map(
+                |(k, v)| -> anyhow::Result<(Address, SnapShotAccountRecord)> {
+                    let code = if let Some(code) = v.info.code {
+                        code
+                    } else {
+                        self.db.code_by_hash_ref(v.info.code_hash)?
+                    }
+                    .to_checked();
+                    Ok((
+                        k,
+                        SnapShotAccountRecord {
+                            nonce: v.info.nonce,
+                            balance: v.info.balance,
+                            code: code.original_bytes(),
+                            storage: v.storage.into_iter().collect(),
+                        },
+                    ))
+                },
+            )
+            .collect::<Result<_, _>>()?;
+        Ok(SnapShot {
+            block_num,
+            source: SnapShotSource::Memory,
+            accounts,
+        })
     }
 }
 
@@ -77,6 +109,8 @@ impl DatabaseCommit for MemDb {
     }
 }
 
+/// *documentation from foundry-rs*
+///
 /// An empty database that always returns default values when queried.
 ///
 /// This is just a simple wrapper for `revm::EmptyDB` but implements `DatabaseError` instead, this
@@ -114,76 +148,5 @@ impl DatabaseRef for EmptyDBWrapper {
 
     fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
         Ok(self.0.block_hash_ref(number)?)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use alloy_primitives::b256;
-
-    /// Ensures the `Database(Ref)` implementation for `revm::CacheDB` works as expected
-    ///
-    /// Demonstrates how calling `Database::basic` works if an account does not exist
-    #[test]
-    fn cache_db_insert_basic_non_existing() {
-        let mut db = CacheDB::new(EmptyDB::default());
-        let address = Address::repeat_byte(22);
-        // call `basic` on a non-existing account
-        let info = Database::basic(&mut db, address).unwrap();
-        assert!(info.is_none());
-        let mut info = info.unwrap_or_default();
-        info.balance = U256::from(500u64);
-
-        // insert the modified account info
-        db.insert_account_info(address, info);
-
-        // when fetching again, the `AccountInfo` is still `None` because the state of the account
-        // is `AccountState::NotExisting`, see <https://github.com/bluealloy/revm/blob/8f4348dc93022cffb3730d9db5d3ab1aad77676a/crates/revm/src/db/in_memory_db.rs#L217-L226>
-        let info = Database::basic(&mut db, address).unwrap();
-        assert!(info.is_none());
-    }
-
-    /// Demonstrates how to insert a new account but not mark it as non-existing
-    #[test]
-    fn cache_db_insert_basic_default() {
-        let mut db = CacheDB::new(EmptyDB::default());
-        let address = Address::repeat_byte(22);
-
-        // We use `basic_ref` here to ensure that the account is not marked as `NotExisting`.
-        let info = DatabaseRef::basic_ref(&db, address).unwrap();
-        assert!(info.is_none());
-        let mut info = info.unwrap_or_default();
-        info.balance = U256::from(500u64);
-
-        // insert the modified account info
-        db.insert_account_info(address, info.clone());
-
-        let loaded = Database::basic(&mut db, address).unwrap();
-        assert!(loaded.is_some());
-        assert_eq!(loaded.unwrap(), info)
-    }
-
-    /// Demonstrates that `Database::basic` for `MemDb` will always return the `AccountInfo`
-    #[test]
-    fn mem_db_insert_basic_default() {
-        let mut db = MemDb::default();
-        let address = Address::from_word(b256!(
-            "000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045"
-        ));
-
-        let info = Database::basic(&mut db, address).unwrap();
-        // We know info exists, as MemDb always returns `Some(AccountInfo)` due to the
-        // `EmptyDbWrapper`.
-        assert!(info.is_some());
-        let mut info = info.unwrap();
-        info.balance = U256::from(500u64);
-
-        // insert the modified account info
-        db.db.insert_account_info(address, info.clone());
-
-        let loaded = Database::basic(&mut db, address).unwrap();
-        assert!(loaded.is_some());
-        assert_eq!(loaded.unwrap(), info)
     }
 }

@@ -1,3 +1,6 @@
+//!
+//! Containers for serializing EVM state information
+//!
 use revm::primitives::{Address, Bytes, U256};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

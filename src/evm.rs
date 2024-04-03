@@ -21,7 +21,8 @@ use crate::{
     SnapShot,
 };
 
-pub type StateChangeSet = Map<Address, Account>;
+/// type alias for a `revm` hashmap of `Address` => `Account`
+type StateChangeSet = Map<Address, Account>;
 
 /// EVM that supports both in-memory and forked storage.
 pub struct BaseEvm {

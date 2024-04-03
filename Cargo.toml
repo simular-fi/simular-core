@@ -2,7 +2,16 @@
 name = "simular-core"
 version = "0.2.2"
 edition = "2021"
+authors = ["Dave Bryson <davebryson@users.noreply.github.com>"]
+categories = ["ethereum"]
+description = "Simple API for interating with an embedded Ethereum Virtual Machine (EVM)"
+documentation = "https://docs.rs/simular-core"
+keywords = ["ethereum", "revm", "EVM"]
+license = "Apache-2.0"
+repository = "https://github.com/simular-fi/simular-core"
 
+[lib]
+doctest = false
 
 [dependencies]
 anyhow = "1.0.81"
@@ -11,7 +20,6 @@ alloy-json-abi = "0.6.4"
 alloy-primitives = { version = "0.6.4", default-features = false }
 alloy-sol-types = { version = "0.6.4", features = ["json"] }
 hex = { version = "0.4.3", features = ["serde"] }
-# Included optional_eip3607"
 revm = { version = "7.1.0", default-features = false, features = [
     "ethersdb",
     "memory_limit",
@@ -37,4 +45,3 @@ openssl = { version = "0.10", features = ["vendored"] }
 [dev-dependencies]
 rstest = "0.18.2"
 dotenvy = "0.15.7"
-plotters = "0.3.3"

@@ -1,12 +1,9 @@
+//!
+//! Provides access to EVM storage
+//!
 pub(crate) mod fork;
 pub(crate) mod fork_backend;
 pub(crate) mod in_memory_db;
-
-use crate::{
-    db::{fork::Fork, in_memory_db::SimularEvmInMemoryDB},
-    errors::DatabaseError,
-    snapshot::{SnapShot, SnapShotAccountRecord, SnapShotSource},
-};
 
 use alloy_primitives::{Address, U256};
 use anyhow::{anyhow, Result};
@@ -17,6 +14,9 @@ use revm::{
     },
     Database, DatabaseCommit, DatabaseRef, EvmBuilder,
 };
+
+use self::{fork::Fork, in_memory_db::MemDb};
+use crate::{errors::DatabaseError, snapshot::SnapShot};
 
 /// Information related to creating a fork
 #[derive(Clone, Debug)]
@@ -42,13 +42,12 @@ impl CreateFork {
     }
 }
 
-// Used by the EVM to access storage.  This can either be an in-memory
-// only db or a forked db.
-// The EVM delegates transact() and transact_commit to this mod...
+// Used by the EVM to access storage.  This can either be an in-memory only db or a forked db.
+// The EVM delegates transact() and transact_commit to this module
 //
 // This is based heavily on Foundry's approach.
 pub struct StorageBackend {
-    mem_db: SimularEvmInMemoryDB, // impl wrapper to handle DbErrors
+    mem_db: MemDb, // impl wrapper to handle DbErrors
     forkdb: Option<Fork>,
     block_number: u64, // used to record in the snapshot...
 }
@@ -64,13 +63,13 @@ impl StorageBackend {
         if let Some(fork) = fork {
             let backend = Fork::new(&fork.url, fork.blocknumber);
             Self {
-                mem_db: SimularEvmInMemoryDB::default(),
+                mem_db: MemDb::default(),
                 forkdb: Some(backend),
                 block_number: fork.blocknumber.unwrap_or(0),
             }
         } else {
             Self {
-                mem_db: SimularEvmInMemoryDB::default(),
+                mem_db: MemDb::default(),
                 forkdb: None,
                 block_number: 0,
             }
@@ -82,7 +81,7 @@ impl StorageBackend {
             fork.database_mut().insert_account_info(address, info)
         } else {
             // use mem...
-            self.mem_db.insert_account_info(address, info)
+            self.mem_db.db.insert_account_info(address, info)
         }
     }
 
@@ -96,7 +95,7 @@ impl StorageBackend {
             fork.database_mut()
                 .insert_account_storage(address, slot, value)
         } else {
-            self.mem_db.insert_account_storage(address, slot, value)
+            self.mem_db.db.insert_account_storage(address, slot, value)
         };
         ret
     }
@@ -110,7 +109,7 @@ impl StorageBackend {
             fork.database_mut()
                 .replace_account_storage(address, storage)
         } else {
-            self.mem_db.replace_account_storage(address, storage)
+            self.mem_db.db.replace_account_storage(address, storage)
         }
     }
 
@@ -124,75 +123,23 @@ impl StorageBackend {
         Ok(res)
     }
 
-    // TODO dedup code here...  Move create_snapshot impl to each backend...
+    /// Create a snapshot of the current state, delegates
+    /// to the current backend database.
     pub fn create_snapshot(&self) -> Result<SnapShot> {
-        if let Some(db) = self.forkdb.as_ref() {
-            let accounts = db
-                .database()
-                .accounts
-                .clone()
-                .into_iter()
-                .map(|(k, v)| -> Result<(Address, SnapShotAccountRecord)> {
-                    let code = if let Some(code) = v.info.code {
-                        code
-                    } else {
-                        db.database().code_by_hash_ref(v.info.code_hash)?
-                    }
-                    .to_checked();
-                    Ok((
-                        k,
-                        SnapShotAccountRecord {
-                            nonce: v.info.nonce,
-                            balance: v.info.balance,
-                            code: code.original_bytes(),
-                            storage: v.storage.into_iter().collect(),
-                        },
-                    ))
-                })
-                .collect::<Result<_, _>>()?;
-            Ok(SnapShot {
-                block_num: self.block_number,
-                source: SnapShotSource::Fork,
-                accounts,
-            })
+        if let Some(fork) = self.forkdb.as_ref() {
+            fork.create_snapshot(self.block_number)
         } else {
-            let accounts = self
-                .mem_db
-                .accounts
-                .clone()
-                .into_iter()
-                .map(|(k, v)| -> Result<(Address, SnapShotAccountRecord)> {
-                    let code = if let Some(code) = v.info.code {
-                        code
-                    } else {
-                        self.mem_db.code_by_hash_ref(v.info.code_hash)?
-                    }
-                    .to_checked();
-                    Ok((
-                        k,
-                        SnapShotAccountRecord {
-                            nonce: v.info.nonce,
-                            balance: v.info.balance,
-                            code: code.original_bytes(),
-                            storage: v.storage.into_iter().collect(),
-                        },
-                    ))
-                })
-                .collect::<Result<_, _>>()?;
-            Ok(SnapShot {
-                block_num: self.block_number,
-                source: SnapShotSource::Memory,
-                accounts,
-            })
+            self.mem_db.create_snapshot(self.block_number)
         }
     }
 
+    /// Load a snapshot into an in-memory database
     pub fn load_snapshot(&mut self, snapshot: SnapShot) {
         self.block_number = snapshot.block_num;
 
         for (addr, account) in snapshot.accounts.into_iter() {
             // note: this will populate both 'accounts' and 'contracts'
-            self.mem_db.insert_account_info(
+            self.mem_db.db.insert_account_info(
                 addr,
                 AccountInfo {
                     balance: account.balance,
@@ -211,6 +158,7 @@ impl StorageBackend {
             // ... but we still need to load the account storage map
             for (k, v) in account.storage.into_iter() {
                 self.mem_db
+                    .db
                     .accounts
                     .entry(addr)
                     .or_default()

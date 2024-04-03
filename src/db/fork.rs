@@ -1,5 +1,9 @@
 //
-use crate::{db::fork_backend::ForkBackend, errors::DatabaseError};
+use crate::{
+    db::fork_backend::ForkBackend,
+    errors::DatabaseError,
+    snapshot::{SnapShot, SnapShotAccountRecord, SnapShotSource},
+};
 use alloy_primitives::{Address, U256};
 use revm::db::{CacheDB, DatabaseRef};
 use revm::primitives::{Account, AccountInfo, Bytecode, HashMap as Map, B256};
@@ -24,6 +28,39 @@ impl Fork {
 
     pub fn database_mut(&mut self) -> &mut CacheDB<ForkBackend> {
         &mut self.db
+    }
+
+    pub fn create_snapshot(&self, block_num: u64) -> anyhow::Result<SnapShot> {
+        let accounts = self
+            .database()
+            .accounts
+            .clone()
+            .into_iter()
+            .map(
+                |(k, v)| -> anyhow::Result<(Address, SnapShotAccountRecord)> {
+                    let code = if let Some(code) = v.info.code {
+                        code
+                    } else {
+                        self.database().code_by_hash_ref(v.info.code_hash)?
+                    }
+                    .to_checked();
+                    Ok((
+                        k,
+                        SnapShotAccountRecord {
+                            nonce: v.info.nonce,
+                            balance: v.info.balance,
+                            code: code.original_bytes(),
+                            storage: v.storage.into_iter().collect(),
+                        },
+                    ))
+                },
+            )
+            .collect::<Result<_, _>>()?;
+        Ok(SnapShot {
+            block_num,
+            source: SnapShotSource::Fork,
+            accounts,
+        })
     }
 }
 

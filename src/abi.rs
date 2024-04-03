@@ -1,5 +1,5 @@
 //!
-//! Parse contract ABIs to encode, decode contract callss
+//! Parse contract ABIs to encode, decode contract calls
 //!
 use alloy_dyn_abi::{DynSolType, DynSolValue, ResolveSolType};
 use alloy_json_abi::{ContractObject, Function, JsonAbi, StateMutability};
@@ -31,6 +31,7 @@ impl ContractAbi {
     }
 
     /// Parse the `abi` and `bytecode`
+    /// Note: `raw` is un-parsed json.
     pub fn from_abi_bytecode(raw: &str, bytecode: Option<Vec<u8>>) -> Self {
         let abi = serde_json::from_str::<JsonAbi>(raw).expect("parsing abi input");
         Self {
@@ -54,10 +55,12 @@ impl ContractAbi {
         self.abi.functions.contains_key(name)
     }
 
+    /// Does the ABI have a fallback?
     pub fn has_fallback(&self) -> bool {
         self.abi.fallback.is_some()
     }
 
+    /// Does the ABI have a receive?
     pub fn has_receive(&self) -> bool {
         self.abi.receive.is_some()
     }
@@ -70,7 +73,7 @@ impl ContractAbi {
     /// Encode the information needed to create a contract.  This will
     /// concatenate the contract bytecode with any arguments required by
     /// the constructor.  Note: `args` is a string of input arguments.  See
-    /// [`encode_function`] for more information.
+    /// `encode_function` for more information.
     pub fn encode_constructor(&self, args: &str) -> Result<(Vec<u8>, bool)> {
         let bytecode = match self.bytecode() {
             Some(b) => b,
@@ -121,12 +124,14 @@ impl ContractAbi {
     ///
     /// ## Example
     ///
-    /// `"(1, hello, (0x11111111111111111111111111111, 5))"` is parsed into a DynSolValue...tuple, U256, etc...
+    /// `"(1, hello, (0x11111111111111111111111111111, 5))"`
+    ///
+    /// is parsed into an alloy `DynSolValue` ...tuple, U256, etc...
     ///
     /// Returns a tuple with:
     /// - encoded function and args
     /// - whether the function is payable
-    /// - and the output DynSolType that can be used to decode the result of the call
+    /// - and the output `DynSolType` that can be used to decode the result of the call
     pub fn encode_function(
         &self,
         name: &str,

@@ -1,3 +1,6 @@
+//!
+//! Database errors
+//!
 use alloy_primitives::{Address, U256};
 use revm::primitives::EVMError;
 use revm::primitives::B256;
