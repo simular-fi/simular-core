@@ -1,6 +1,6 @@
  This library provides a simple API for interacting with an embedded Ethereum Virtual Machine (EVM).
 
- <br/>
+ ![Crates.io Version](https://img.shields.io/crates/v/simular-core?style=flat)
 
  ```toml
  [dependencies]
