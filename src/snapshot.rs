@@ -2,27 +2,28 @@ use revm::primitives::{Address, Bytes, U256};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// Source of the snapshop.  Either from a fork or the local in-memory DB.
+/// Source of the snapshop.  Either from a fork or the local in-memory database.
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
-pub enum SerializingSource {
+pub enum SnapShotSource {
     Memory,
     #[default]
     Fork,
 }
 
-/// A single AccountRecord and it's associated storage
+/// A single AccountRecord and it's associated storage. `SnapShot` stores
+/// a map of these.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SerializableAccountRecord {
+pub struct SnapShotAccountRecord {
     pub nonce: u64,
     pub balance: U256,
     pub code: Bytes,
     pub storage: BTreeMap<U256, U256>,
 }
 
-/// The high-level objects containing the snapshot.
+/// The high-level objects containing the all the snapshot information.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct SerializableState {
-    pub source: SerializingSource,
+pub struct SnapShot {
+    pub source: SnapShotSource,
     pub block_num: u64,
-    pub accounts: BTreeMap<Address, SerializableAccountRecord>,
+    pub accounts: BTreeMap<Address, SnapShotAccountRecord>,
 }

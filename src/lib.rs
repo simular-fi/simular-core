@@ -4,14 +4,13 @@
 //! - `forkdb/memdb` : backend storage for the EVM
 //! - `baseevm`      : manipulate accounts, send transactions
 pub mod abi;
-pub mod baseevm;
+pub mod db;
 pub mod errors;
-pub mod forkdb;
-pub mod memdb;
+pub mod evm;
 pub mod snapshot;
 
 // re-exports
-pub use {abi::ContractAbi, baseevm::EvmFork, baseevm::EvmMemory, snapshot::SerializableState};
+pub use {abi::ContractAbi, db::CreateFork, evm::BaseEvm, snapshot::SnapShot};
 
 use alloy_primitives::Address;
 

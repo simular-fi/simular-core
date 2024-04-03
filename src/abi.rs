@@ -1,14 +1,21 @@
+//!
+//! Parse contract ABIs to encode, decode contract callss
+//!
 use alloy_dyn_abi::{DynSolType, DynSolValue, ResolveSolType};
 use alloy_json_abi::{ContractObject, Function, JsonAbi, StateMutability};
 use alloy_primitives::Bytes;
 use anyhow::{anyhow, bail, Result};
 
 pub struct ContractAbi {
+    /// alloy's json abi object
     pub abi: JsonAbi,
+    /// optional contract bytecode
     pub bytecode: Option<Bytes>,
 }
 
 impl ContractAbi {
+    /// Parse the `abi` and `bytecode` from a compiled contract's json file.
+    /// Note: `raw` is un-parsed json.
     pub fn from_full_json(raw: &str) -> Self {
         let co = serde_json::from_str::<ContractObject>(raw).expect("parsing abi json");
         if co.abi.is_none() {
@@ -23,6 +30,7 @@ impl ContractAbi {
         }
     }
 
+    /// Parse the `abi` and `bytecode`
     pub fn from_abi_bytecode(raw: &str, bytecode: Option<Vec<u8>>) -> Self {
         let abi = serde_json::from_str::<JsonAbi>(raw).expect("parsing abi input");
         Self {
@@ -31,6 +39,8 @@ impl ContractAbi {
         }
     }
 
+    /// Parse an ABI (without bytecode) from a `Vec` of contract function definitions.
+    /// See [human readable abi](https://docs.ethers.org/v5/api/utils/abi/formats/#abi-formats--human-readable-abi)
     pub fn from_human_readable(input: Vec<&str>) -> Self {
         let abi = JsonAbi::parse(input).expect("valid solidity functions information");
         Self {
@@ -40,7 +50,6 @@ impl ContractAbi {
     }
 
     /// Is there a function with the given name?
-    /// Called from the Python Contract's __getattr__
     pub fn has_function(&self, name: &str) -> bool {
         self.abi.functions.contains_key(name)
     }
@@ -58,6 +67,10 @@ impl ContractAbi {
         self.bytecode.as_ref().map(|b| b.to_vec())
     }
 
+    /// Encode the information needed to create a contract.  This will
+    /// concatenate the contract bytecode with any arguments required by
+    /// the constructor.  Note: `args` is a string of input arguments.  See
+    /// [`encode_function`] for more information.
     pub fn encode_constructor(&self, args: &str) -> Result<(Vec<u8>, bool)> {
         let bytecode = match self.bytecode() {
             Some(b) => b,
@@ -99,6 +112,21 @@ impl ContractAbi {
         })
     }
 
+    /// Encode function information for use in a transaction. Note: `args` is a string
+    /// of input parameters that are parsed by alloy `DynSolType`'s  and converted into
+    /// `DynSolValue`s.   See [DynSolType.coerce_str()](https://docs.rs/alloy-dyn-abi/latest/alloy_dyn_abi/enum.DynSolType.html#method.coerce_str)
+    ///  
+    /// - `name` is the name of the function
+    /// - `args` string of input arguments
+    ///
+    /// ## Example
+    ///
+    /// `"(1, hello, (0x11111111111111111111111111111, 5))"` is parsed into a DynSolValue...tuple, U256, etc...
+    ///
+    /// Returns a tuple with:
+    /// - encoded function and args
+    /// - whether the function is payable
+    /// - and the output DynSolType that can be used to decode the result of the call
     pub fn encode_function(
         &self,
         name: &str,

@@ -11,6 +11,7 @@ alloy-json-abi = "0.6.4"
 alloy-primitives = { version = "0.6.4", default-features = false }
 alloy-sol-types = { version = "0.6.4", features = ["json"] }
 hex = { version = "0.4.3", features = ["serde"] }
+# Included optional_eip3607"
 revm = { version = "7.1.0", default-features = false, features = [
     "ethersdb",
     "memory_limit",
@@ -34,5 +35,6 @@ openssl = { version = "0.10", features = ["vendored"] }
 
 
 [dev-dependencies]
+rstest = "0.18.2"
 dotenvy = "0.15.7"
 plotters = "0.3.3"

@@ -1,10 +1,9 @@
-use alloy_primitives::{Address, U256};
-use alloy_sol_types::{sol, SolCall};
-use anyhow::Result;
-use plotters::prelude::*;
-use revm::{primitives::bitvec::macros::internal::funty::Fundamental, Database, DatabaseCommit};
+use alloy_primitives::{address, Address, U256};
+use alloy_sol_types::sol;
+//use plotters::prelude::*;
+use revm::primitives::bitvec::macros::internal::funty::Fundamental;
 
-use simular_core::{baseevm::BaseEvm, forkdb::ForkDb, memdb::InMemoryDb, SerializableState};
+use simular_core::{BaseEvm, CreateFork, SnapShot};
 
 sol!(Dai, "examples/abis/dai.abi");
 sol!(Weth, "examples/abis/weth.abi");
@@ -15,29 +14,6 @@ sol!(UniswapFactory, "examples/abis/UniswapV3Factory.abi");
 const Q96: f64 = 79228162514264340000000000000.0;
 const FEE: u32 = 3000;
 const DEPOSIT: u128 = 1e24 as u128; // 1_000_000 eth
-
-fn call<T: SolCall, DB: Database + DatabaseCommit>(
-    evm: &mut BaseEvm<DB>,
-    to: Address,
-    args: T,
-) -> Result<<T as SolCall>::Return> {
-    //let (encode_get_pool, _, decoder) = abi.encode_function(fn_name, args).unwrap();
-    let data = args.abi_encode();
-    let (output, _) = evm.call(to, data).unwrap();
-    T::abi_decode_returns(&output, true).map_err(|e| anyhow::anyhow!("error: {:?}", e))
-}
-
-fn transact<T: SolCall, DB: Database + DatabaseCommit>(
-    evm: &mut BaseEvm<DB>,
-    to: Address,
-    caller: Address,
-    args: T,
-    value: U256,
-) -> Result<<T as SolCall>::Return> {
-    let data = args.abi_encode();
-    let (output, _) = evm.transact(caller, to, data, value).unwrap();
-    T::abi_decode_returns(&output, true).map_err(|e| anyhow::anyhow!("error: {:?}", e))
-}
 
 /// Divide two u256 values returning a f64
 ///
@@ -73,6 +49,9 @@ pub fn token1_price(sqrtp: U256) -> f64 {
     1.0 / t0
 }
 
+// TODO move addresses here
+const HELLO: Address = address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
+
 #[allow(dead_code)]
 fn init_cache(url: &str) {
     let zero = U256::from(0);
@@ -96,39 +75,43 @@ fn init_cache(url: &str) {
         .unwrap();
     let agent = Address::with_last_byte(22);
 
-    let mut evm = BaseEvm::<ForkDb>::create(url, None);
+    let mut evm = BaseEvm::new(Some(CreateFork::latest_block(url.to_string())));
 
     evm.create_account(agent, Some(deposit)).unwrap();
     evm.create_account(dai_admin, Some(deposit)).unwrap(); // <--- NOTE THIS
 
-    let pool_address = call(
-        &mut evm,
-        uniswap_factory,
-        UniswapFactory::getPoolCall {
-            _0: weth,
-            _1: dai,
-            _2: FEE,
-        },
-    )
-    .unwrap()
-    ._0;
-
-    let token_0 = call(&mut evm, pool_address, UniswapPool::token0Call {})
+    let pool_address = evm
+        .transact_call_sol(
+            uniswap_factory,
+            UniswapFactory::getPoolCall {
+                _0: weth,
+                _1: dai,
+                _2: FEE,
+            },
+            zero,
+        )
         .unwrap()
         ._0;
-    let token_1 = call(&mut evm, pool_address, UniswapPool::token1Call {})
+
+    let token_0 = evm
+        .transact_call_sol(pool_address, UniswapPool::token0Call {}, zero)
+        .unwrap()
+        ._0;
+    let token_1 = evm
+        .transact_call_sol(pool_address, UniswapPool::token1Call {}, zero)
         .unwrap()
         ._0;
 
     // solely to load in cache
-    call(&mut evm, pool_address, UniswapPool::slot0Call {}).unwrap();
+    evm.transact_call_sol(pool_address, UniswapPool::slot0Call {}, zero)
+        .unwrap();
 
     // fund/approve agent's weth account
-    transact(&mut evm, weth, agent, Weth::depositCall {}, deposit).unwrap();
-    transact(
-        &mut evm,
-        weth,
+    evm.transact_commit_sol(agent, weth, Weth::depositCall {}, deposit)
+        .unwrap();
+    evm.transact_commit_sol(
         agent,
+        weth,
         Weth::approveCall {
             guy: uniswap_router,
             wad: deposit,
@@ -139,16 +122,15 @@ fn init_cache(url: &str) {
 
     assert_eq!(
         U256::from(1),
-        call(&mut evm, dai, Dai::wardsCall { _0: dai_admin })
+        evm.transact_call_sol(dai, Dai::wardsCall { _0: dai_admin }, zero)
             .unwrap()
             ._0
     );
 
     // mint/approve agent's dai account
-    transact(
-        &mut evm,
-        dai,
+    evm.transact_commit_sol(
         dai_admin,
+        dai,
         Dai::mintCall {
             usr: agent,
             wad: deposit,
@@ -156,10 +138,10 @@ fn init_cache(url: &str) {
         zero,
     )
     .unwrap();
-    transact(
-        &mut evm,
-        dai,
+
+    evm.transact_commit_sol(
         agent,
+        dai,
         Dai::approveCall {
             usr: uniswap_router,
             wad: deposit,
@@ -169,69 +151,73 @@ fn init_cache(url: &str) {
     .unwrap();
 
     // confirm balances and allowances
-    let weth_bal = call(&mut evm, weth, Weth::balanceOfCall { _0: agent }).unwrap();
-    let dai_bal = call(&mut evm, weth, Dai::balanceOfCall { _0: agent }).unwrap();
+    let weth_bal = evm
+        .transact_call_sol(weth, Weth::balanceOfCall { _0: agent }, zero)
+        .unwrap();
+    let dai_bal = evm
+        .transact_call_sol(weth, Dai::balanceOfCall { _0: agent }, zero)
+        .unwrap();
     assert_eq!(weth_bal._0, deposit);
     assert_eq!(dai_bal._0, deposit);
 
     print_balances(&mut evm, agent, dai, weth);
 
-    let dai_allowance = call(
-        &mut evm,
-        dai,
-        Dai::allowanceCall {
-            _0: agent,
-            _1: uniswap_router,
-        },
-    )
-    .unwrap()
-    ._0;
+    let dai_allowance = evm
+        .transact_call_sol(
+            dai,
+            Dai::allowanceCall {
+                _0: agent,
+                _1: uniswap_router,
+            },
+            zero,
+        )
+        .unwrap()
+        ._0;
     assert_eq!(dai_allowance, deposit);
-    let weth_allowance = call(
-        &mut evm,
-        weth,
-        Weth::allowanceCall {
-            _0: agent,
-            _1: uniswap_router,
-        },
-    )
-    .unwrap()
-    ._0;
+    let weth_allowance = evm
+        .transact_call_sol(
+            weth,
+            Weth::allowanceCall {
+                _0: agent,
+                _1: uniswap_router,
+            },
+            zero,
+        )
+        .unwrap()
+        ._0;
     assert_eq!(weth_allowance, deposit);
 
-    // the call that's been killing me now works!
-    let swapped = transact(
-        &mut evm,
-        uniswap_router,
-        agent,
-        SwapRouter::exactInputSingleCall {
-            params: SwapRouter::ExactInputSingleParams {
-                tokenIn: token_1,
-                tokenOut: token_0,
-                fee: FEE,
-                recipient: agent,
-                deadline: U256::from(1e32 as u128),
-                amountIn: U256::from(1e18 as u128),
-                amountOutMinimum: U256::from(0),
-                sqrtPriceLimitX96: U256::from(0),
+    let swapped = evm
+        .transact_commit_sol(
+            agent,
+            uniswap_router,
+            SwapRouter::exactInputSingleCall {
+                params: SwapRouter::ExactInputSingleParams {
+                    tokenIn: token_1,
+                    tokenOut: token_0,
+                    fee: FEE,
+                    recipient: agent,
+                    deadline: U256::from(1e32 as u128),
+                    amountIn: U256::from(1e18 as u128),
+                    amountOutMinimum: U256::from(0),
+                    sqrtPriceLimitX96: U256::from(0),
+                },
             },
-        },
-        zero,
-    )
-    .unwrap()
-    .amountOut;
+            zero,
+        )
+        .unwrap()
+        .amountOut;
 
     println!("got {:?} dai", div_u256(swapped, U256::from(1e18), 12));
     print_balances(&mut evm, agent, dai, weth);
 
-    let st = evm.dump_state().unwrap();
+    let st = evm.create_snapshot().unwrap();
     let jsonstate = serde_json::to_string_pretty(&st).unwrap();
     std::fs::write("wethdai_cache.json", jsonstate).expect("Unable to write file");
 }
 
 fn load_and_run_from_cache() -> (Vec<(f32, f32)>, ((f32, f32), (f64, f64))) {
     let zero = U256::from(0);
-    //let deposit: U256 = U256::from(DEPOSIT);
 
     // Addresses
     let agent = Address::with_last_byte(22);
@@ -252,33 +238,36 @@ fn load_and_run_from_cache() -> (Vec<(f32, f32)>, ((f32, f32), (f64, f64))) {
         .unwrap();
 
     let raw = std::fs::read("wethdai_cache.json").unwrap();
-    let cache: SerializableState = serde_json::from_slice(&raw).unwrap();
+    let cache: SnapShot = serde_json::from_slice(&raw).unwrap();
 
-    let mut evm: BaseEvm<InMemoryDb> = BaseEvm::default();
-    evm.load_state(cache);
+    let mut evm = BaseEvm::new_from_snapshot(cache);
 
     println!("starting balances");
     print_balances(&mut evm, agent, dai, weth);
 
-    let pool_address = call(
-        &mut evm,
-        uniswap_factory,
-        UniswapFactory::getPoolCall {
-            _0: weth,
-            _1: dai,
-            _2: FEE,
-        },
-    )
-    .unwrap()
-    ._0;
-    let token_0 = call(&mut evm, pool_address, UniswapPool::token0Call {})
+    let pool_address = evm
+        .transact_call_sol(
+            uniswap_factory,
+            UniswapFactory::getPoolCall {
+                _0: weth,
+                _1: dai,
+                _2: FEE,
+            },
+            zero,
+        )
         .unwrap()
         ._0;
-    let token_1 = call(&mut evm, pool_address, UniswapPool::token1Call {})
+    let token_0 = evm
+        .transact_call_sol(pool_address, UniswapPool::token0Call {}, zero)
+        .unwrap()
+        ._0;
+    let token_1 = evm
+        .transact_call_sol(pool_address, UniswapPool::token1Call {}, zero)
         .unwrap()
         ._0;
 
-    let sqrtp = call(&mut evm, pool_address, UniswapPool::slot0Call {})
+    let sqrtp = evm
+        .transact_call_sol(pool_address, UniswapPool::slot0Call {}, zero)
         .unwrap()
         .sqrtPriceX96;
 
@@ -290,43 +279,37 @@ fn load_and_run_from_cache() -> (Vec<(f32, f32)>, ((f32, f32), (f64, f64))) {
 
     for i in 0..10 {
         // single agent
-        let swapped = transact(
-            &mut evm,
-            uniswap_router,
-            agent,
-            SwapRouter::exactInputSingleCall {
-                params: SwapRouter::ExactInputSingleParams {
-                    tokenIn: token_1,
-                    tokenOut: token_0,
-                    fee: FEE,
-                    recipient: agent,
-                    deadline: U256::from(1e32 as u128),
-                    amountIn: U256::from(1e18 as u128),
-                    amountOutMinimum: U256::from(0),
-                    sqrtPriceLimitX96: U256::from(0),
+        let swapped = evm
+            .transact_commit_sol(
+                agent,
+                uniswap_router,
+                SwapRouter::exactInputSingleCall {
+                    params: SwapRouter::ExactInputSingleParams {
+                        tokenIn: token_1,
+                        tokenOut: token_0,
+                        fee: FEE,
+                        recipient: agent,
+                        deadline: U256::from(1e32 as u128),
+                        amountIn: U256::from(1e18 as u128),
+                        amountOutMinimum: U256::from(0),
+                        sqrtPriceLimitX96: U256::from(0),
+                    },
                 },
-            },
-            zero,
-        )
-        .unwrap()
-        .amountOut;
+                zero,
+            )
+            .unwrap()
+            .amountOut;
 
         let recv_dai = div_u256(swapped, U256::from(1e18), 12);
         data.push((i as f32, recv_dai as f32));
 
         println!("recv: {:?} dai", recv_dai);
         println!("---------------------------------");
-
-        //let sqrtp = call(&mut evm, pool_address, UniswapPool::slot0Call {})
-        //    .unwrap()
-        //    .sqrtPriceX96;
-        //let t1_price = token1_price(sqrtp);
-        //println!("dia price per weth: {:?} dai", t1_price);
-        //data.push((i as f32, t1_price as f32));
     }
     print_balances(&mut evm, agent, dai, weth);
 
-    let sqrtp = call(&mut evm, pool_address, UniswapPool::slot0Call {})
+    let sqrtp = evm
+        .transact_call_sol(pool_address, UniswapPool::slot0Call {}, zero)
         .unwrap()
         .sqrtPriceX96;
 
@@ -338,16 +321,17 @@ fn load_and_run_from_cache() -> (Vec<(f32, f32)>, ((f32, f32), (f64, f64))) {
     (data, xy)
 }
 
-fn print_balances<DB: Database + DatabaseCommit>(
-    evm: &mut BaseEvm<DB>,
-    user: Address,
-    dai: Address,
-    weth: Address,
-) {
-    let dai_bal = call(evm, dai, Dai::balanceOfCall { _0: user }).unwrap();
+fn print_balances(evm: &mut BaseEvm, user: Address, dai: Address, weth: Address) {
+    let zero = U256::from(0);
+
+    let dai_bal = evm
+        .transact_call_sol(dai, Dai::balanceOfCall { _0: user }, zero)
+        .unwrap();
     println!("dia bal: {:?}", div_u256(dai_bal._0, U256::from(1e18), 12));
 
-    let weth_bal = call(evm, weth, Weth::balanceOfCall { _0: user }).unwrap();
+    let weth_bal = evm
+        .transact_call_sol(weth, Weth::balanceOfCall { _0: user }, zero)
+        .unwrap();
     println!(
         "weth bal from cache: {:?}",
         div_u256(weth_bal._0, U256::from(1e18), 12)
@@ -358,20 +342,9 @@ pub fn main() {
     //let url = dotenvy::var("ALCHEMY").expect("Alchemy URL");
     //init_cache(&url);
 
-    let data = load_and_run_from_cache();
+    let _data = load_and_run_from_cache();
 
     /*
-    let xaxis = std::ops::Range {
-        start: data.1 .0 .0,
-        end: data.1 .0 .1,
-    };
-
-    let yaxis = std::ops::Range {
-        start: data.1 .1 .0,
-        end: data.1 .1 .1,
-    };
-    */
-
     let xstart = 0 as f32;
     let xstop = 9 as f32;
     let ystart = data.1 .1 .0 as f32;
@@ -416,4 +389,5 @@ pub fn main() {
     //    }))
     //    .unwrap();
     root.present().unwrap();
+    */
 }
