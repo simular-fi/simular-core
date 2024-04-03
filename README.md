@@ -74,8 +74,11 @@ Interacting with a remote contract pulls the state of the remote contract into t
      
      println!("total supply: {:?}", value);
    ```
+
+See [uniswap](https://github.com/simular-fi/simular-core/tree/main/examples/uniswap) for an example of using a fork and snapshot to trade a pair on Uniswap
+
 ## Standing on the shoulders of giants...
 Thanks to the following projects for making this work possible!
 - [revm](https://github.com/bluealloy/revm)
 - [alloy-rs](https://github.com/alloy-rs)
-- [foundry-rs](https://github.com/foundry-rs/foundry) for much of the design
+- [foundry-rs](https://github.com/foundry-rs/foundry) for much of the design influence
