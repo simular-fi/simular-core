@@ -62,10 +62,11 @@ impl StorageBackend {
     pub fn new(fork: Option<CreateFork>) -> Self {
         if let Some(fork) = fork {
             let backend = Fork::new(&fork.url, fork.blocknumber);
+            let block_number = backend.block_number;
             Self {
                 mem_db: MemDb::default(),
                 forkdb: Some(backend),
-                block_number: fork.blocknumber.unwrap_or(0),
+                block_number,
             }
         } else {
             Self {

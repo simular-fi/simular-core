@@ -4,21 +4,25 @@ use crate::{
     errors::DatabaseError,
     snapshot::{SnapShot, SnapShotAccountRecord, SnapShotSource},
 };
-use alloy_primitives::{Address, U256};
+use alloy_primitives::U256;
 use revm::db::{CacheDB, DatabaseRef};
+use revm::primitives::Address;
 use revm::primitives::{Account, AccountInfo, Bytecode, HashMap as Map, B256};
 use revm::{Database, DatabaseCommit};
 
 #[derive(Clone, Debug)]
 pub struct Fork {
     pub db: CacheDB<ForkBackend>,
+    pub block_number: u64,
 }
 
 impl Fork {
     pub fn new(url: &str, starting_block_number: Option<u64>) -> Self {
         let backend = ForkBackend::new(url, starting_block_number);
+        let block_number = backend.block_number;
         Self {
             db: CacheDB::new(backend),
+            block_number,
         }
     }
 

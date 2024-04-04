@@ -1,7 +1,7 @@
 //!
 //! Parse contract ABIs to encode, decode contract calls
 //!
-use alloy_dyn_abi::{DynSolType, DynSolValue, ResolveSolType};
+use alloy_dyn_abi::{DynSolType, DynSolValue, Specifier};
 use alloy_json_abi::{ContractObject, Function, JsonAbi, StateMutability};
 use alloy_primitives::Bytes;
 use anyhow::{anyhow, bail, Result};
