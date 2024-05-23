@@ -2,11 +2,6 @@
 //!
 //! <br/>
 //!
-//! ```toml
-//! [dependencies]
-//! simular-core = "0.2.2"
-//! ```
-//!
 //! # Supports
 //! - Both an in-memory database and the ability to fork state from a remote node
 //! - Snapshot of EVM state for later use
