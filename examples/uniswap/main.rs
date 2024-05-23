@@ -37,15 +37,9 @@ fn buy_dai() {
         .unwrap()
         .sqrtPriceX96;
 
-    let dai_initial_price = token1_price(sqrtp);
-    println!("Example of swapping WETH for DAI");
-    println!("Starting Exchange Rate:");
-    println!("- DAI per 1 Ether: {}", dai_initial_price);
-    println!("- ETHER per 1 DAI: {}", token0_price(sqrtp));
-
+    println!("Swapping WETH for DAI");
     println!("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
-    println!("Making 10 buys of DAI...");
-    println!("  note how rate decreases due to demand  ");
+    println!("Making 10 buys...");
     for _ in 0..10 {
         // single agent
         let swapped = evm
@@ -71,7 +65,7 @@ fn buy_dai() {
 
         let dai_recv = format_ether(swapped);
 
-        println!("recv: {:} DAI for 1 Ether", dai_recv);
+        println!("recv: {:} DAI for 1 WETH", dai_recv);
         println!("---------------------------------");
     }
 }
