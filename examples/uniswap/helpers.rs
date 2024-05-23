@@ -20,17 +20,18 @@ sol!(SwapRouter, "examples/abis/SwapRouter.abi");
 sol!(UniswapPool, "examples/abis/UniswapV3Pool.abi");
 sol!(UniswapFactory, "examples/abis/UniswapV3Factory.abi");
 
+#[allow(dead_code)]
 pub fn sqrtp_to_price(sqrtp: U256) -> f64 {
-    //let q96 = 2f64.powf(96.0);
     let sp: f64 = sqrtp.try_into().unwrap();
     (sp / Q96).powf(2.0)
 }
 
+#[allow(dead_code)]
 pub fn token0_price(sqrtp: U256) -> f64 {
-    let sp = sqrtp_to_price(sqrtp);
-    sp
+    sqrtp_to_price(sqrtp)
 }
 
+#[allow(dead_code)]
 pub fn token1_price(sqrtp: U256) -> f64 {
     let t0 = token0_price(sqrtp);
     assert!(t0 > 0.0);

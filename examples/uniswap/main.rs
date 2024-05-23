@@ -32,11 +32,6 @@ fn buy_dai() {
         .unwrap()
         ._0;
 
-    let sqrtp = evm
-        .transact_call_sol(pool_address, UniswapPool::slot0Call {}, zero)
-        .unwrap()
-        .sqrtPriceX96;
-
     println!("Swapping WETH for DAI");
     println!("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
     println!("Making 10 buys...");
