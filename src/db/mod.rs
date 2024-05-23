@@ -14,6 +14,7 @@ use revm::{
     },
     Database, DatabaseCommit, DatabaseRef, EvmBuilder,
 };
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use self::{fork::Fork, in_memory_db::MemDb};
 use crate::{errors::DatabaseError, snapshot::SnapShot};
@@ -49,7 +50,8 @@ impl CreateFork {
 pub struct StorageBackend {
     mem_db: MemDb, // impl wrapper to handle DbErrors
     forkdb: Option<Fork>,
-    block_number: u64, // used to record in the snapshot...
+    pub block_number: u64, // used to record in the snapshot...
+    pub timestamp: u64,
 }
 
 impl Default for StorageBackend {
@@ -63,16 +65,23 @@ impl StorageBackend {
         if let Some(fork) = fork {
             let backend = Fork::new(&fork.url, fork.blocknumber);
             let block_number = backend.block_number;
+            let timestamp = backend.timestamp;
             Self {
                 mem_db: MemDb::default(),
                 forkdb: Some(backend),
                 block_number,
+                timestamp,
             }
         } else {
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("StorageBackend: failed to get unix epoch time")
+                .as_secs();
             Self {
                 mem_db: MemDb::default(),
                 forkdb: None,
-                block_number: 0,
+                block_number: 1,
+                timestamp,
             }
         }
     }
@@ -128,15 +137,17 @@ impl StorageBackend {
     /// to the current backend database.
     pub fn create_snapshot(&self) -> Result<SnapShot> {
         if let Some(fork) = self.forkdb.as_ref() {
-            fork.create_snapshot(self.block_number)
+            fork.create_snapshot(self.block_number, self.timestamp)
         } else {
-            self.mem_db.create_snapshot(self.block_number)
+            self.mem_db
+                .create_snapshot(self.block_number, self.timestamp)
         }
     }
 
     /// Load a snapshot into an in-memory database
     pub fn load_snapshot(&mut self, snapshot: SnapShot) {
         self.block_number = snapshot.block_num;
+        self.timestamp = snapshot.timestamp;
 
         for (addr, account) in snapshot.accounts.into_iter() {
             // note: this will populate both 'accounts' and 'contracts'
@@ -167,6 +178,12 @@ impl StorageBackend {
                     .insert(k, v);
             }
         }
+    }
+
+    /// See EVM update_block
+    pub fn update_block_info(&mut self, interval: u64) {
+        self.block_number += 1;
+        self.timestamp += interval;
     }
 }
 

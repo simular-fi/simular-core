@@ -14,15 +14,18 @@ use revm::{Database, DatabaseCommit};
 pub struct Fork {
     pub db: CacheDB<ForkBackend>,
     pub block_number: u64,
+    pub timestamp: u64,
 }
 
 impl Fork {
     pub fn new(url: &str, starting_block_number: Option<u64>) -> Self {
         let backend = ForkBackend::new(url, starting_block_number);
         let block_number = backend.block_number;
+        let timestamp = backend.timestamp;
         Self {
             db: CacheDB::new(backend),
             block_number,
+            timestamp,
         }
     }
 
@@ -34,7 +37,7 @@ impl Fork {
         &mut self.db
     }
 
-    pub fn create_snapshot(&self, block_num: u64) -> anyhow::Result<SnapShot> {
+    pub fn create_snapshot(&self, block_num: u64, timestamp: u64) -> anyhow::Result<SnapShot> {
         let accounts = self
             .database()
             .accounts
@@ -62,6 +65,7 @@ impl Fork {
             .collect::<Result<_, _>>()?;
         Ok(SnapShot {
             block_num,
+            timestamp,
             source: SnapShotSource::Fork,
             accounts,
         })

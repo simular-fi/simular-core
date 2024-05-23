@@ -29,7 +29,7 @@ impl Default for MemDb {
 }
 
 impl MemDb {
-    pub fn create_snapshot(&self, block_num: u64) -> anyhow::Result<SnapShot> {
+    pub fn create_snapshot(&self, block_num: u64, timestamp: u64) -> anyhow::Result<SnapShot> {
         let accounts = self
             .db
             .accounts
@@ -57,6 +57,7 @@ impl MemDb {
             .collect::<Result<_, _>>()?;
         Ok(SnapShot {
             block_num,
+            timestamp,
             source: SnapShotSource::Memory,
             accounts,
         })

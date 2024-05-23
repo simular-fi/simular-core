@@ -28,5 +28,6 @@ pub struct SnapShotAccountRecord {
 pub struct SnapShot {
     pub source: SnapShotSource,
     pub block_num: u64,
+    pub timestamp: u64,
     pub accounts: BTreeMap<Address, SnapShotAccountRecord>,
 }

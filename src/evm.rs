@@ -173,6 +173,15 @@ impl BaseEvm {
         process_call_result(result)
     }
 
+    /// Advance `block.number` and `block.timestamp`. Set `interval` to the
+    /// amount of time in seconds you want to advance the timestamp. Block number
+    /// will be automatically incremented.
+    ///
+    /// Must be manually called.
+    pub fn update_block(&mut self, interval: u64) {
+        self.backend.update_block_info(interval);
+    }
+
     fn build_env(
         &self,
         caller: Option<Address>,
@@ -180,10 +189,15 @@ impl BaseEvm {
         data: Bytes,
         value: U256,
     ) -> EnvWithHandlerCfg {
+        let blkn = self.backend.block_number;
+        let ts = self.backend.timestamp;
+
         let env = Env {
             cfg: self.env.cfg.clone(),
             block: BlockEnv {
                 basefee: U256::ZERO,
+                timestamp: U256::from(ts),
+                number: U256::from(blkn),
                 ..self.env.block.clone()
             },
             tx: TxEnv {
@@ -298,6 +312,12 @@ mod tests {
         }
     }
 
+    sol! {
+        contract BlockMeta {
+            function getMeta() external view returns (uint, uint);
+        }
+    }
+
     #[fixture]
     fn contract_bytecode() -> Vec<u8> {
         let raw: &str = "608060405260405161032c38038061032c8339810160408190526100\
@@ -325,6 +345,16 @@ mod tests {
         37b62d24b4c1b64736f6c63430008140033";
 
         hex::decode(raw).expect("failed to decode bytecode")
+    }
+
+    #[fixture]
+    fn meta_bytecode() -> Vec<u8> {
+        let raw: &str = "6080604052348015600f57600080fd5b50607c80601d6000396000f\
+        3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063a79af2ce\
+        14602d575b600080fd5b6040805142815243602082015281519081900390910190f3fea2646\
+        9706673582212202c76d8081bf4b8745cf50463d5b4f48aadbd688456ec111406e9010a51d4\
+        56ba64736f6c63430008150033";
+        hex::decode(raw).expect("failed to decode meta bytecode")
     }
 
     #[test]
@@ -522,5 +552,48 @@ mod tests {
                 .unwrap()
                 ._0
         );
+    }
+
+    #[rstest]
+    fn updates_block_meta(meta_bytecode: Vec<u8>) {
+        const INTERVAL: u64 = 15; // update time interval
+
+        let owner = Address::repeat_byte(12);
+        let mut evm = BaseEvm::default();
+        evm.create_account(owner, Some(U256::from(1e18))).unwrap();
+        let addr = evm.deploy(owner, meta_bytecode, U256::from(0)).unwrap();
+
+        let tx1 = evm
+            .transact_call_sol(addr, BlockMeta::getMetaCall {}, U256::from(0))
+            .unwrap();
+        assert_eq!(U256::from(1), tx1._1);
+
+        let start = tx1._0;
+        evm.update_block(INTERVAL);
+        evm.update_block(INTERVAL);
+        evm.update_block(INTERVAL);
+
+        let tx2 = evm
+            .transact_call_sol(addr, BlockMeta::getMetaCall {}, U256::from(0))
+            .unwrap();
+
+        let expected_time = start + U256::from(45);
+        let expected_block = U256::from(4);
+
+        // advances block number and timestamp
+        assert_eq!(expected_block, tx2._1);
+        assert_eq!(expected_time, tx2._0);
+
+        let snap = evm.create_snapshot().unwrap();
+        assert_eq!(snap.block_num, 4);
+        assert_eq!(U256::from(snap.timestamp), expected_time);
+
+        // reload new evm and meta
+        let mut evm2 = BaseEvm::new_from_snapshot(snap);
+        let tx3 = evm2
+            .transact_call_sol(addr, BlockMeta::getMetaCall {}, U256::from(0))
+            .unwrap();
+        assert_eq!(expected_block, tx3._1);
+        assert_eq!(expected_time, tx3._0);
     }
 }

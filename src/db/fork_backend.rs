@@ -1,6 +1,6 @@
 use alloy_primitives::{Address, U256};
 use anyhow::Result;
-use ethers_core::types::{Block, BlockId, TxHash, H160, H256, U64};
+use ethers_core::types::{Block, BlockId, BlockNumber, TxHash, H160, H256, U64};
 use ethers_providers::{Http, Middleware, Provider, ProviderError};
 use revm::{
     primitives::{AccountInfo, Bytecode, B256, KECCAK_EMPTY},
@@ -17,6 +17,7 @@ pub type HttpProvider = Provider<Http>;
 pub struct ForkBackend {
     provider: Arc<HttpProvider>,
     pub block_number: u64,
+    pub timestamp: u64,
 }
 
 impl ForkBackend {
@@ -25,6 +26,23 @@ impl ForkBackend {
             Provider::<Http>::try_from(url).expect("ForkBackend: failed to load HTTP provider");
         let provider = Arc::new(client);
 
+        let blockid = if let Some(bn) = starting_block_number {
+            BlockId::from(U64::from(bn))
+        } else {
+            BlockId::from(BlockNumber::Latest)
+        };
+
+        let blk = match Self::block_on(provider.get_block(blockid)) {
+            Ok(Some(b)) => b,
+            _ => panic!("ForkBackend: failed to load block information"),
+        };
+
+        let block_number = blk
+            .number
+            .expect("ForkBackend: Got 'pending' block number")
+            .as_u64();
+        let timestamp = blk.timestamp.as_u64();
+        /*
         let block_number = if let Some(bn) = starting_block_number {
             bn
         } else {
@@ -32,10 +50,12 @@ impl ForkBackend {
                 .expect("ForkBackend: failed to load latest blocknumber from remote")
                 .as_u64()
         };
+        */
 
         Self {
             provider,
             block_number,
+            timestamp,
         }
     }
 
