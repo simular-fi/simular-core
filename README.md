@@ -4,7 +4,7 @@
 
  ```toml
  [dependencies]
- simular-core = "0.2.3"
+ simular-core = "0.2.4"
  ```
 
  # Supports
@@ -75,7 +75,15 @@ Interacting with a remote contract pulls the state of the remote contract into t
      println!("total supply: {:?}", value);
    ```
 
-See [uniswap](https://github.com/simular-fi/simular-core/tree/main/examples/uniswap) for an example of using a fork and snapshot to trade a pair on Uniswap
+See [uniswap](https://github.com/simular-fi/simular-core/tree/main/examples/uniswap) for an example of using a fork and snapshot to trade a pair on Uniswap. The example includes a snapshot that it loads state from to execute Uniswap trades.
+
+To run the example:
+```sh
+> cargo run --example uniswap
+```
+
+
+
 
 ## Standing on the shoulders of giants...
 Thanks to the following projects for making this work possible!
