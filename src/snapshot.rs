@@ -14,7 +14,7 @@ pub enum SnapShotSource {
 }
 
 /// A single AccountRecord and it's associated storage. `SnapShot` stores
-/// a map of these.
+/// a map of Accounts.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SnapShotAccountRecord {
     pub nonce: u64,
@@ -23,7 +23,7 @@ pub struct SnapShotAccountRecord {
     pub storage: BTreeMap<U256, U256>,
 }
 
-/// The high-level objects containing the all the snapshot information.
+/// The high-level objects containing all the snapshot information.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct SnapShot {
     pub source: SnapShotSource,

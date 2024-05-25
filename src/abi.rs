@@ -17,12 +17,13 @@ impl ContractAbi {
     /// Parse the `abi` and `bytecode` from a compiled contract's json file.
     /// Note: `raw` is un-parsed json.
     pub fn from_full_json(raw: &str) -> Self {
-        let co = serde_json::from_str::<ContractObject>(raw).expect("parsing abi json");
+        let co =
+            serde_json::from_str::<ContractObject>(raw).expect("Abi: failed to parse abi to json");
         if co.abi.is_none() {
-            panic!("ABI not found in file")
+            panic!("Abi: ABI not found in file")
         }
         if co.bytecode.is_none() {
-            panic!("Bytecode not found in file")
+            panic!("Abi: Bytecode not found in file")
         }
         Self {
             abi: co.abi.unwrap(),
@@ -33,7 +34,7 @@ impl ContractAbi {
     /// Parse the `abi` and `bytecode`
     /// Note: `raw` is un-parsed json.
     pub fn from_abi_bytecode(raw: &str, bytecode: Option<Vec<u8>>) -> Self {
-        let abi = serde_json::from_str::<JsonAbi>(raw).expect("parsing abi input");
+        let abi = serde_json::from_str::<JsonAbi>(raw).expect("Abi: failed to parse abi");
         Self {
             abi,
             bytecode: bytecode.map(Bytes::from),
@@ -43,7 +44,7 @@ impl ContractAbi {
     /// Parse an ABI (without bytecode) from a `Vec` of contract function definitions.
     /// See [human readable abi](https://docs.ethers.org/v5/api/utils/abi/formats/#abi-formats--human-readable-abi)
     pub fn from_human_readable(input: Vec<&str>) -> Self {
-        let abi = JsonAbi::parse(input).expect("valid solidity functions information");
+        let abi = JsonAbi::parse(input).expect("Abi: Invalid solidity function(s) format");
         Self {
             abi,
             bytecode: None,
@@ -77,7 +78,7 @@ impl ContractAbi {
     pub fn encode_constructor(&self, args: &str) -> Result<(Vec<u8>, bool)> {
         let bytecode = match self.bytecode() {
             Some(b) => b,
-            _ => bail!("Missing contract bytecode!"),
+            _ => bail!("Abi: Missing contract bytecode!"),
         };
 
         let constructor = match &self.abi.constructor {
@@ -93,7 +94,7 @@ impl ContractAbi {
 
         let ty = DynSolType::Tuple(types);
         let dynavalues = ty.coerce_str(args).map_err(|_| {
-            anyhow!("Error coercing the arguments for the constructor. Check the input argument(s)")
+            anyhow!("Abi: Error coercing the arguments for the constructor. Check the input argument(s)")
         })?;
         let encoded_args = dynavalues.abi_encode_params();
         let is_payable = matches!(constructor.state_mutability, StateMutability::Payable);
@@ -110,7 +111,7 @@ impl ContractAbi {
         let ty = DynSolType::Tuple(types);
         ty.coerce_str(args).map_err(|_| {
             anyhow!(
-                "Error coercing the arguments for the function call. Check the input argument(s)"
+                "Abi: Error coercing the arguments for the function call. Check the input argument(s)"
             )
         })
     }
@@ -139,7 +140,7 @@ impl ContractAbi {
     ) -> anyhow::Result<(Vec<u8>, bool, DynSolType)> {
         let funcs = match self.abi.function(name) {
             Some(funcs) => funcs,
-            _ => bail!("Function {} not found in the ABI!", name),
+            _ => bail!("Abi: Function {} not found in the ABI!", name),
         };
 
         for f in funcs {
@@ -164,7 +165,7 @@ impl ContractAbi {
         // if we get here, it means we didn't find a function that
         // matched the input arguments
         Err(anyhow::anyhow!(
-            "Arguments to the function do not match what is expected"
+            "Abi: Arguments to the function do not match what is expected"
         ))
     }
 }
@@ -173,8 +174,9 @@ impl ContractAbi {
 mod tests {
 
     use super::*;
-    use alloy_primitives::{Address, U256};
+    use alloy_primitives::{Address, FixedBytes, U256};
     use alloy_sol_types::{sol, SolCall};
+    use hex::FromHex;
 
     sol! {
 
@@ -195,6 +197,24 @@ mod tests {
             function one() public returns (bool);
             function one(uint256);
             function one(address, (uint64, uint64)) public returns (address);
+        }
+    }
+
+    sol! {
+        struct A {
+            uint256 value;
+            address owner;
+            bool isok;
+        }
+
+        struct B {
+            bytes data;
+        }
+
+        contract KitchenSink {
+            function check_types(uint256, bool, address, string, bytes32);
+            function check_both(A, B);
+            function check_blend(string, uint160, A);
         }
     }
 
@@ -265,5 +285,62 @@ mod tests {
             .unwrap();
 
         assert_eq!(sc, ac);
+    }
+
+    #[test]
+    fn encode_kitchen_sink() {
+        let addy = "0x023e09e337f5a6c82e62fe5ae4b6396d34930751";
+        // fixed bytes below
+        // "0101010101010101010101010101010101010101010101010101010101010101";
+
+        // encode with sol!
+        let expected_check_types = KitchenSink::check_typesCall {
+            _0: U256::from(1),
+            _1: true,
+            _2: Address::from_hex(addy).unwrap(),
+            _3: "bob".to_string(),
+            _4: FixedBytes::from_slice(&[1u8; 32]),
+        }
+        .abi_encode();
+
+        let abi = ContractAbi::from_human_readable(vec![
+            "function check_types(uint256, bool, address, string, bytes32)",
+            "function check_both(tuple(uint256, address, bool), tuple(bytes))",
+            "function check_blend(string, uint160, tuple(uint256, address, bool))",
+        ]);
+
+        // encode with abi: python input format
+        let input = "(1, true, 0x023e09e337f5a6c82e62fe5ae4b6396d34930751, 'bob', 0101010101010101010101010101010101010101010101010101010101010101)";
+        let (actual, _, _) = abi.encode_function("check_types", input).unwrap();
+        assert_eq!(expected_check_types, actual);
+
+        let expected_check_both = KitchenSink::check_bothCall {
+            _0: A {
+                value: U256::from(10),
+                owner: Address::from_hex(addy).unwrap(),
+                isok: false,
+            },
+            _1: B { data: Bytes::new() },
+        }
+        .abi_encode();
+
+        let input_both = "((10, 0x023e09e337f5a6c82e62fe5ae4b6396d34930751, false),(0x))";
+        let (actualboth, _, _) = abi.encode_function("check_both", input_both).unwrap();
+        assert_eq!(expected_check_both, actualboth);
+
+        let expected_check_blend = KitchenSink::check_blendCall {
+            _0: "bob".to_string(),
+            _1: U256::from(5),
+            _2: A {
+                value: U256::from(10),
+                owner: Address::from_hex(addy).unwrap(),
+                isok: false,
+            },
+        }
+        .abi_encode();
+
+        let input_blend = "(bob, 5,(10, 0x023e09e337f5a6c82e62fe5ae4b6396d34930751, false))";
+        let (actualblend, _, _) = abi.encode_function("check_blend", input_blend).unwrap();
+        assert_eq!(expected_check_blend, actualblend)
     }
 }
