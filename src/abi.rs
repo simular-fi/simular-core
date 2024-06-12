@@ -3,14 +3,58 @@
 //!
 use alloy_dyn_abi::{DynSolEvent, DynSolType, DynSolValue, Specifier};
 use alloy_json_abi::{ContractObject, Function, JsonAbi, StateMutability};
-use alloy_primitives::Bytes;
+use alloy_primitives::{Bytes, Log, LogData};
 use anyhow::{anyhow, bail, Result};
+use std::collections::BTreeMap;
+
+type EventMap = BTreeMap<std::string::String, Vec<alloy_json_abi::Event>>;
+
+///
+/// Wrapper around pre-processed Events to help extract log information.
+/// We flatten the structure of `events` in JsonAbi to make it easier to
+/// automatically decode Logs from a `call` or `transact`.
+///
+/// EventLog is contains DynSolEvent to be used to decode log information
+#[derive(Debug)]
+pub struct EventLog {
+    pub name: String,
+    pub decoder: DynSolEvent,
+}
+
+impl EventLog {
+    /// Attempt to decode the log and return the event name and extracted values as
+    /// DynSolValues.
+    pub fn decode(&self, log: &LogData) -> Option<(String, DynSolValue)> {
+        if let Ok(r) = self.decoder.decode_log(log, true) {
+            let v = DynSolValue::Tuple([r.indexed, r.body].concat());
+            return Some((self.name.clone(), v));
+        }
+        None
+    }
+}
 
 pub struct ContractAbi {
     /// alloy's json abi object
     pub abi: JsonAbi,
     /// optional contract bytecode
     pub bytecode: Option<Bytes>,
+    /// Contract event information with a log decoder
+    pub events_logs: Vec<EventLog>,
+}
+
+// walk through the events in JsonAbi to flatten the
+// structure and convert to `EventLog`.
+fn convert_events(ev: &EventMap) -> Vec<EventLog> {
+    ev.iter()
+        .flat_map(|(k, v)| {
+            v.iter()
+                .map(|e| EventLog {
+                    name: k.clone(),
+                    decoder: e.resolve().unwrap(),
+                })
+                .collect::<Vec<EventLog>>()
+        })
+        .collect::<Vec<EventLog>>()
 }
 
 impl ContractAbi {
@@ -25,9 +69,12 @@ impl ContractAbi {
         if co.bytecode.is_none() {
             panic!("Abi: Bytecode not found in file")
         }
+        let abi = co.abi.unwrap();
+        let evts = convert_events(&abi.events);
         Self {
-            abi: co.abi.unwrap(),
+            abi,
             bytecode: co.bytecode,
+            events_logs: evts,
         }
     }
 
@@ -35,9 +82,11 @@ impl ContractAbi {
     /// Note: `raw` is un-parsed json.
     pub fn from_abi_bytecode(raw: &str, bytecode: Option<Vec<u8>>) -> Self {
         let abi = serde_json::from_str::<JsonAbi>(raw).expect("Abi: failed to parse abi");
+        let evts = convert_events(&abi.events);
         Self {
             abi,
             bytecode: bytecode.map(Bytes::from),
+            events_logs: evts,
         }
     }
 
@@ -45,25 +94,24 @@ impl ContractAbi {
     /// See [human readable abi](https://docs.ethers.org/v5/api/utils/abi/formats/#abi-formats--human-readable-abi)
     pub fn from_human_readable(input: Vec<&str>) -> Self {
         let abi = JsonAbi::parse(input).expect("Abi: Invalid solidity function(s) format");
+        let evts = convert_events(&abi.events);
         Self {
             abi,
             bytecode: None,
+            events_logs: evts,
         }
     }
 
-    /// Get event ABI information for the associated event name. There may be more than
-    /// one event with the same name but different parameters.
-    ///
-    /// This will return `DynSolEvent`s that can be used to decode the log.
-    pub fn get_events(&self, name: &str) -> Option<Vec<DynSolEvent>> {
-        if let Some(v) = self.abi.events.get(name) {
-            return Some(
-                v.iter()
-                    .map(|e| e.resolve().unwrap())
-                    .collect::<Vec<DynSolEvent>>(),
-            );
+    pub fn extract_logs(&self, logs: Vec<Log>) -> Vec<(String, DynSolValue)> {
+        let mut results: Vec<(String, DynSolValue)> = Vec::new();
+        for log in logs {
+            for e in &self.events_logs {
+                if let Some(p) = e.decode(&log.data) {
+                    results.push(p);
+                }
+            }
         }
-        None
+        results
     }
 
     /// Is there a function with the given name?
@@ -360,39 +408,19 @@ mod tests {
     }
 
     #[test]
-    fn test_event_basics() {
-        let topic0 = b256!("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef");
-        let log = LogData::new_unchecked(
-            vec![
-                topic0,
-                b256!("000000000000000000000000c2e9f25be6257c210d7adf0d4cd6e3e881ba25f8"),
-                b256!("0000000000000000000000002b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b"),
-            ],
-            bytes!("0000000000000000000000000000000000000000000000cdf13dd32f1d65e661"),
-        );
-
-        let abi = ContractAbi::from_human_readable(vec![
-            "event Transfer(address indexed from,address indexed to,uint256 amount)",
-        ]);
-
-        assert!(abi.get_events("nope").is_none());
-
-        let events = abi.get_events("Transfer").unwrap();
-        assert_eq!(1, events.len());
-
-        let decoded = events[0].decode_log(&log, true).unwrap();
-        assert_eq!(2, decoded.indexed.len());
-        assert_eq!(1, decoded.body.len());
-    }
-
-    #[test]
-    fn more_events_tests() {
-        let abi = ContractAbi::from_human_readable(vec![
+    fn test_flatten_event_structure() {
+        // mint signature: 0x0f6798a560793a54c3bcfe86a93cde1e73087d944c0ea20544137d4121396885
+        // burn signature: 0xcc16f5dbb4873280815c1ee09dbd06736cffcc184412cf7a71a0fdb75d397ca5
+        let sample = ContractAbi::from_human_readable(vec![
             "event Transfer(address indexed from,address indexed to,uint256 amount)",
             "event Transfer(address indexed from) anonymous",
+            "event Mint(address indexed recip,uint256 amount)",
+            "event Burn(address indexed recip,uint256 amount)",
         ]);
 
-        let log1 = LogData::new_unchecked(
+        assert_eq!(4, sample.events_logs.len());
+
+        let transfer = LogData::new_unchecked(
             vec![
                 b256!("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"),
                 b256!("000000000000000000000000c2e9f25be6257c210d7adf0d4cd6e3e881ba25f8"),
@@ -401,26 +429,29 @@ mod tests {
             bytes!("0000000000000000000000000000000000000000000000000000000000000005"),
         );
 
-        let log2 = LogData::new_unchecked(
-            vec![b256!(
-                "000000000000000000000000c2e9f25be6257c210d7adf0d4cd6e3e881ba25f8"
-            )],
-            bytes!(""),
+        let burn = LogData::new_unchecked(
+            vec![
+                b256!("cc16f5dbb4873280815c1ee09dbd06736cffcc184412cf7a71a0fdb75d397ca5"),
+                b256!("000000000000000000000000c2e9f25be6257c210d7adf0d4cd6e3e881ba25f8"),
+            ],
+            bytes!("0000000000000000000000000000000000000000000000000000000000000005"),
         );
 
-        let events = abi.get_events("Transfer").unwrap();
-        assert_eq!(2, events.len());
+        let log_address = Address::repeat_byte(14);
+        let logs = vec![
+            Log {
+                address: log_address,
+                data: transfer,
+            },
+            Log {
+                address: log_address,
+                data: burn,
+            },
+        ];
 
-        let mut results: Vec<DynSolValue> = Vec::new();
-        for log in vec![&log1, &log2] {
-            for e in &events {
-                if let Ok(r) = e.decode_log(log, true) {
-                    results.push(DynSolValue::Tuple([r.indexed, r.body].concat()));
-                }
-            }
-        }
-        assert!(results.len() == 2);
-        let all = DynSolValue::Tuple(results);
-        println!("{:?}", all);
+        let results = sample.extract_logs(logs);
+        assert_eq!(2, results.len());
+
+        //println!("{:?}", results);
     }
 }
