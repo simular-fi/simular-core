@@ -1,7 +1,7 @@
 //!
 //! Parse contract ABIs to encode, decode contract calls
 //!
-use alloy_dyn_abi::{DynSolType, DynSolValue, Specifier};
+use alloy_dyn_abi::{DynSolEvent, DynSolType, DynSolValue, Specifier};
 use alloy_json_abi::{ContractObject, Function, JsonAbi, StateMutability};
 use alloy_primitives::Bytes;
 use anyhow::{anyhow, bail, Result};
@@ -49,6 +49,21 @@ impl ContractAbi {
             abi,
             bytecode: None,
         }
+    }
+
+    /// Get event ABI information for the associated event name. There may be more than
+    /// one event with the same name but different parameters.
+    ///
+    /// This will return `DynSolEvent`s that can be used to decode the log.
+    pub fn get_events(&self, name: &str) -> Option<Vec<DynSolEvent>> {
+        if let Some(v) = self.abi.events.get(name) {
+            return Some(
+                v.iter()
+                    .map(|e| e.resolve().unwrap())
+                    .collect::<Vec<DynSolEvent>>(),
+            );
+        }
+        None
     }
 
     /// Is there a function with the given name?
@@ -174,7 +189,7 @@ impl ContractAbi {
 mod tests {
 
     use super::*;
-    use alloy_primitives::{Address, FixedBytes, U256};
+    use alloy_primitives::{b256, bytes, Address, FixedBytes, LogData, U256};
     use alloy_sol_types::{sol, SolCall};
     use hex::FromHex;
 
@@ -342,5 +357,70 @@ mod tests {
         let input_blend = "(bob, 5,(10, 0x023e09e337f5a6c82e62fe5ae4b6396d34930751, false))";
         let (actualblend, _, _) = abi.encode_function("check_blend", input_blend).unwrap();
         assert_eq!(expected_check_blend, actualblend)
+    }
+
+    #[test]
+    fn test_event_basics() {
+        let topic0 = b256!("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef");
+        let log = LogData::new_unchecked(
+            vec![
+                topic0,
+                b256!("000000000000000000000000c2e9f25be6257c210d7adf0d4cd6e3e881ba25f8"),
+                b256!("0000000000000000000000002b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b"),
+            ],
+            bytes!("0000000000000000000000000000000000000000000000cdf13dd32f1d65e661"),
+        );
+
+        let abi = ContractAbi::from_human_readable(vec![
+            "event Transfer(address indexed from,address indexed to,uint256 amount)",
+        ]);
+
+        assert!(abi.get_events("nope").is_none());
+
+        let events = abi.get_events("Transfer").unwrap();
+        assert_eq!(1, events.len());
+
+        let decoded = events[0].decode_log(&log, true).unwrap();
+        assert_eq!(2, decoded.indexed.len());
+        assert_eq!(1, decoded.body.len());
+    }
+
+    #[test]
+    fn more_events_tests() {
+        let abi = ContractAbi::from_human_readable(vec![
+            "event Transfer(address indexed from,address indexed to,uint256 amount)",
+            "event Transfer(address indexed from) anonymous",
+        ]);
+
+        let log1 = LogData::new_unchecked(
+            vec![
+                b256!("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"),
+                b256!("000000000000000000000000c2e9f25be6257c210d7adf0d4cd6e3e881ba25f8"),
+                b256!("0000000000000000000000002b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b"),
+            ],
+            bytes!("0000000000000000000000000000000000000000000000000000000000000005"),
+        );
+
+        let log2 = LogData::new_unchecked(
+            vec![b256!(
+                "000000000000000000000000c2e9f25be6257c210d7adf0d4cd6e3e881ba25f8"
+            )],
+            bytes!(""),
+        );
+
+        let events = abi.get_events("Transfer").unwrap();
+        assert_eq!(2, events.len());
+
+        let mut results: Vec<DynSolValue> = Vec::new();
+        for log in vec![&log1, &log2] {
+            for e in &events {
+                if let Ok(r) = e.decode_log(log, true) {
+                    results.push(DynSolValue::Tuple([r.indexed, r.body].concat()));
+                }
+            }
+        }
+        assert!(results.len() == 2);
+        let all = DynSolValue::Tuple(results);
+        println!("{:?}", all);
     }
 }
