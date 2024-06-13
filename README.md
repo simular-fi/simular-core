@@ -4,7 +4,7 @@
 
  ```toml
  [dependencies]
- simular-core = "0.2.4"
+ simular-core = "0.2.5"
  ```
 
  # Supports
@@ -43,14 +43,14 @@
 Interacting with a remote contract pulls the state of the remote contract into the local in-memory database for use.
 
    ```rust
-     use simular_core::{BaseEvm, generate_random_addresses, ContractAbi;
+     use simular_core::{BaseEvm, generate_random_addresses, ContractAbi};
      use alloy_primitives::{Address, U256, address};
      
+     // create ABI inline
      let abi = ContractAbi::from_human_readable(vec![
      "function totalSupply() (uint256)"
      ]);
     
-     
      // create a fork using the latest block
      let fork_info = CreateFork.latest_block(URL OF JSON-RPC NODE);
      let mut evm = BaseEvm::new(Some(fork_info));
@@ -75,7 +75,7 @@ Interacting with a remote contract pulls the state of the remote contract into t
      println!("total supply: {:?}", value);
    ```
 
-See [uniswap](https://github.com/simular-fi/simular-core/tree/main/examples/uniswap) for an example of using a fork and snapshot to trade a pair on Uniswap. The example includes a snapshot that it loads state from to execute Uniswap trades.
+See [uniswap](https://github.com/simular-fi/simular-core/tree/main/examples/uniswap) for an example of using a fork and snapshot to trade a pair on Uniswap. 
 
 To run the example:
 ```sh
