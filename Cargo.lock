@@ -2614,7 +2614,7 @@ dependencies = [
 
 [[package]]
 name = "simular-core"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "alloy-dyn-abi",
  "alloy-json-abi",
