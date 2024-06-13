@@ -200,23 +200,31 @@ impl ContractAbi {
         &self,
         name: &str,
         args: &str,
-    ) -> anyhow::Result<(Vec<u8>, bool, DynSolType)> {
+    ) -> anyhow::Result<(Vec<u8>, bool, Option<DynSolType>)> {
         let funcs = match self.abi.function(name) {
             Some(funcs) => funcs,
             _ => bail!("Abi: Function {} not found in the ABI!", name),
         };
 
+        // find the first function that matches the input args
         for f in funcs {
             let result = Self::extract(f, args);
             let is_payable = matches!(f.state_mutability, StateMutability::Payable);
-            // find the first function that matches the input args
             if result.is_ok() {
-                let types = f
-                    .outputs
-                    .iter()
-                    .map(|i| i.resolve().unwrap())
-                    .collect::<Vec<_>>();
-                let ty = DynSolType::Tuple(types);
+                // Get the return type decoder, if any...
+                let ty = match f.outputs.len() {
+                    0 => None,
+                    1 => f.outputs.get(0).unwrap().clone().resolve().ok(),
+                    _ => {
+                        let t = f
+                            .outputs
+                            .iter()
+                            .map(|i| i.resolve().unwrap())
+                            .collect::<Vec<_>>();
+                        Some(DynSolType::Tuple(t))
+                    }
+                };
+
                 let selector = f.selector().to_vec();
                 let encoded_args = result.unwrap().abi_encode_params();
                 let all = [selector, encoded_args].concat();
@@ -293,6 +301,30 @@ mod tests {
     }
 
     #[test]
+    fn encoding_function_decoder_types() {
+        let tc = ContractAbi::from_human_readable(vec![
+            "function a()",
+            "function b() (uint256)",
+            "function c() (bool, address, uint256)",
+        ]);
+
+        let (_, _, r1) = tc.encode_function("a", "()").unwrap();
+        let (_, _, r2) = tc.encode_function("b", "()").unwrap();
+        let (_, _, r3) = tc.encode_function("c", "()").unwrap();
+
+        assert_eq!(None, r1);
+        assert_eq!(Some(DynSolType::Uint(256)), r2);
+        assert_eq!(
+            Some(DynSolType::Tuple(vec![
+                DynSolType::Bool,
+                DynSolType::Address,
+                DynSolType::Uint(256)
+            ])),
+            r3
+        );
+    }
+
+    #[test]
     fn encoding_functions() {
         let hello_world = vec!["function hello(tuple(uint256, address, uint160)) (bool)"];
         let hw = ContractAbi::from_human_readable(hello_world);
@@ -317,7 +349,7 @@ mod tests {
 
         assert!(!is_payable);
         assert_eq!(solencoded, cencoded);
-        assert_eq!(dtype, DynSolType::Tuple(vec![DynSolType::Bool]));
+        assert_eq!(dtype, Some(DynSolType::Bool));
     }
 
     #[test]
@@ -343,11 +375,12 @@ mod tests {
             _1: (10u64, 11u64),
         }
         .abi_encode();
-        let (ac, _, _) = abi
+        let (ac, _, otype) = abi
             .encode_function("one", &format!("({},({},{}))", addy.to_string(), 10, 11))
             .unwrap();
 
         assert_eq!(sc, ac);
+        assert_eq!(Some(DynSolType::Address), otype);
     }
 
     #[test]
