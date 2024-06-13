@@ -160,7 +160,7 @@ impl BaseEvm {
         process_call_result(result)
     }
 
-    /// Simulate a contract call (read/write) without changing state.
+    /// Simulate a `transact_commit` without actually committing/changing state.
     pub fn simulate(
         &mut self,
         caller: Address,
@@ -282,7 +282,9 @@ fn process_call_result(result: ResultAndState) -> Result<CallResult> {
 
 #[cfg(test)]
 mod tests {
+    use crate::ContractAbi;
     use crate::{generate_random_addresses, BaseEvm};
+    use alloy_dyn_abi::DynSolValue;
     use alloy_primitives::{Address, U256};
     use alloy_sol_types::{sol, SolConstructor};
     use rstest::*;
@@ -391,6 +393,87 @@ mod tests {
 
         let s = evm.create_snapshot();
         println!("{:?}", s);
+    }
+
+    #[rstest]
+    fn no_sol_test_contract(contract_bytecode: Vec<u8>) {
+        let zero = U256::from(0);
+        let owner = Address::repeat_byte(12);
+        let mut evm = BaseEvm::default();
+        evm.create_account(owner, Some(U256::from(1e18))).unwrap();
+
+        let mut test_contract_abi = ContractAbi::from_human_readable(vec![
+            "constructor(uint256)",
+            "function owner() (address)",
+            "function value() (uint256)",
+            "function increment() (uint256)",
+            "function increment(uint256) (uint256, uint256)",
+        ]);
+        test_contract_abi.bytecode = Some(contract_bytecode.into());
+
+        let (args, _) = test_contract_abi.encode_constructor("(1)").unwrap();
+        let contract_address = evm.deploy(owner, args, U256::from(0)).unwrap();
+
+        // Check owner call
+        let (enc_owner_call, _, de1) = test_contract_abi.encode_function("owner", "()").unwrap();
+        let o1 = evm
+            .transact_call(contract_address, enc_owner_call, zero)
+            .unwrap();
+        assert!(DynSolValue::Address(owner) == de1.unwrap().abi_decode(&o1.result).unwrap());
+
+        // do increment()
+        let (enc_inc_0, _, de2) = test_contract_abi
+            .encode_function("increment", "()")
+            .unwrap();
+        let o2 = evm
+            .transact_commit(owner, contract_address, enc_inc_0, zero)
+            .unwrap();
+        assert!(
+            DynSolValue::Uint(U256::from(1), 256) == de2.unwrap().abi_decode(&o2.result).unwrap()
+        );
+
+        // check the value
+        let (enc_value_call, _, de3) = test_contract_abi.encode_function("value", "()").unwrap();
+        let o3 = evm
+            .transact_call(contract_address, enc_value_call, zero)
+            .unwrap();
+        assert!(
+            DynSolValue::Uint(U256::from(2), 256) == de3.unwrap().abi_decode(&o3.result).unwrap()
+        );
+
+        // do increment(value)
+        let (enc_inc_1, _, de4) = test_contract_abi
+            .encode_function("increment", "(2)")
+            .unwrap();
+        let o4 = evm
+            .transact_commit(owner, contract_address, enc_inc_1, zero)
+            .unwrap();
+        assert!(
+            DynSolValue::Tuple(vec![
+                DynSolValue::Uint(U256::from(2), 256),
+                DynSolValue::Uint(U256::from(4), 256)
+            ]) == de4.unwrap().abi_decode(&o4.result).unwrap()
+        );
+
+        // simulate increment
+        let (enc_inc_sim, _, des) = test_contract_abi
+            .encode_function("increment", "()")
+            .unwrap();
+        let os = evm
+            .simulate(owner, contract_address, enc_inc_sim, zero)
+            .unwrap();
+        assert!(
+            DynSolValue::Uint(U256::from(4), 256) == des.unwrap().abi_decode(&os.result).unwrap()
+        );
+
+        // make sure value didn't change from 'simulate'
+        let (enc_value_call1, _, de5) = test_contract_abi.encode_function("value", "()").unwrap();
+        let o5 = evm
+            .transact_call(contract_address, enc_value_call1, zero)
+            .unwrap();
+        assert!(
+            DynSolValue::Uint(U256::from(4), 256) == de5.unwrap().abi_decode(&o5.result).unwrap()
+        );
     }
 
     #[rstest]

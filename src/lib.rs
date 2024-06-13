@@ -65,7 +65,7 @@
 //!         U256::from(0)).unwrap();
 //!
 //!     // decode the result
-//!     let value = decoder.abi_decode(&output.result)
+//!     let value = decoder.unwrap().abi_decode(&output.result)
 //!     
 //!     println!("total supply: {:?}", value);
 //!   ```

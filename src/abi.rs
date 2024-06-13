@@ -12,12 +12,14 @@ type EventMap = BTreeMap<std::string::String, Vec<alloy_json_abi::Event>>;
 ///
 /// Wrapper around pre-processed Events to help extract log information.
 /// We flatten the structure of `events` in JsonAbi to make it easier to
-/// automatically decode Logs from a `call` or `transact`.
+/// automatically decode Logs from a `transact/simulate`.
 ///
-/// EventLog is contains DynSolEvent to be used to decode log information
+/// EventLog contains `DynSolEvent` to be used to decode log information
 #[derive(Debug)]
 pub struct EventLog {
+    /// the event name
     pub name: String,
+    /// the decoder resolved from the original event
     pub decoder: DynSolEvent,
 }
 
@@ -102,6 +104,7 @@ impl ContractAbi {
         }
     }
 
+    /// Extract and decode logs from emitted events
     pub fn extract_logs(&self, logs: Vec<Log>) -> Vec<(String, DynSolValue)> {
         let mut results: Vec<(String, DynSolValue)> = Vec::new();
         for log in logs {
@@ -214,7 +217,7 @@ impl ContractAbi {
                 // Get the return type decoder, if any...
                 let ty = match f.outputs.len() {
                     0 => None,
-                    1 => f.outputs.get(0).unwrap().clone().resolve().ok(),
+                    1 => f.outputs.first().unwrap().clone().resolve().ok(),
                     _ => {
                         let t = f
                             .outputs

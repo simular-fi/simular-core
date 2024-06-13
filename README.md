@@ -70,7 +70,7 @@ Interacting with a remote contract pulls the state of the remote contract into t
          U256::from(0)).unwrap();
 
      // decode the result
-     let value = decoder.abi_decode(&output.result)
+     let value = decoder.unwrap().abi_decode(&output.result)
      
      println!("total supply: {:?}", value);
    ```
@@ -81,9 +81,6 @@ To run the example:
 ```sh
 > cargo run --example uniswap
 ```
-
-
-
 
 ## Standing on the shoulders of giants...
 Thanks to the following projects for making this work possible!
